@@ -451,26 +451,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               <ExternalLink className="w-3.5 h-3.5 ml-auto text-cyan-400 shrink-0" />
             </a>
 
-            {/* Preview code helper (visible in preview/test or static Vercel if email wasn't dispatched through external SMTP) */}
+            {/* Preview code helper (visible when external SMTP is not yet configured) */}
             {previewCode && (
-              <div className="bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs text-indigo-200">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
-                  <span>Code de sécurité généré :</span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono font-bold tracking-wider text-cyan-300 bg-black/40 px-2 py-0.5 rounded border border-cyan-500/30 text-sm">
-                    {previewCode}
+              <div className="bg-amber-950/30 border border-amber-500/30 p-3 rounded-xl flex flex-col gap-2 text-xs text-amber-200">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 font-bold text-amber-300">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Code direct (secours immédiat) :</span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setResetCode(previewCode)}
-                    className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer transition-colors"
-                    title="Insérer automatiquement ce code"
-                  >
-                    Insérer
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-black tracking-wider text-amber-300 bg-black/60 px-2 py-0.5 rounded border border-amber-500/40 text-sm">
+                      {previewCode}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setResetCode(previewCode)}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-2.5 py-0.5 rounded text-[11px] cursor-pointer transition-colors shadow-sm"
+                      title="Insérer automatiquement ce code"
+                    >
+                      Insérer
+                    </button>
+                  </div>
                 </div>
+                <p className="text-[10.5px] text-slate-400 leading-relaxed border-t border-amber-500/20 pt-1.5">
+                  ℹ️ L'envoi automatique par Gmail nécessite la configuration de votre mot de passe d'application Google dans l'espace admin. Ce code s'affiche donc ici pour vous débloquer immédiatement sans attendre !
+                </p>
               </div>
             )}
 
