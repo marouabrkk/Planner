@@ -59,6 +59,13 @@ const DEFAULT_DB: DatabaseSchema = {
     ccp: '',
     contact: '@maroua144 (Telegram)'
   },
+  smtpSettings: {
+    user: 'ber7iche@gmail.com',
+    pass: 'xbkwqnjystzdibnc',
+    fromName: 'AURA Master Planner',
+    service: 'gmail',
+    updatedAt: new Date().toISOString()
+  },
   userData: {}
 };
 

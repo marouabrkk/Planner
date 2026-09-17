@@ -238,6 +238,7 @@ async function startServer() {
     res.json({
       success: true,
       delivered: emailResult.delivered,
+      code,
       previewCode: emailResult.delivered ? undefined : code,
       message: emailResult.delivered
         ? `Code secret envoyé à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`

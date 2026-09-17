@@ -57,7 +57,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         if (data.success) {
           serverHandled = true;
           serverDelivered = Boolean(data.delivered);
-          serverCode = data.previewCode || null;
+          serverCode = data.code || data.previewCode || null;
+
+          if (data.code) {
+            try {
+              const raw = localStorage.getItem('aura_reset_codes') || '{}';
+              const store = JSON.parse(raw);
+              store[cleanEmail.toLowerCase()] = data.code;
+              localStorage.setItem('aura_reset_codes', JSON.stringify(store));
+            } catch {
+              // ignore
+            }
+          }
         }
       }
     } catch {
@@ -69,7 +80,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       setResendCooldown(30);
       setIsEmailDelivered(true);
       setPreviewCode(null);
-      setSuccessMsg(`Code secret envoyé avec succès dans votre boîte Gmail (${cleanEmail}) !`);
+      setSuccessMsg(`Code secret envoyé à ${cleanEmail} ! Ouvrez votre boîte Gmail (et vérifiez vos spams).`);
       setIsLoading(false);
       return;
     }
