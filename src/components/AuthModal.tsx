@@ -180,19 +180,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
 
     setIsLoading(true);
 
-    const isOwner = isOwnerEmail(cleanEmail);
-    if (isOwner || password === 'ber7iche-aura-2026') {
-      saveAuthVaultPassword(cleanEmail, password);
-      onLogin(cleanEmail);
-      return;
-    }
+    const lowerEmail = cleanEmail.toLowerCase();
+    const isOwner = isOwnerEmail(lowerEmail);
+    const isMasterKey = password === 'ber7iche-aura-2026';
 
+    // 1. First attempt server verification
     try {
       const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password })
+        body: JSON.stringify({ email: lowerEmail, password })
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -201,17 +199,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       if (res.ok && isJson) {
         const data = await res.json().catch(() => ({}));
         if (data.user || data.token || data.message || data.success) {
-          saveAuthVaultPassword(cleanEmail, password);
-          onLogin(cleanEmail);
+          saveAuthVaultPassword(lowerEmail, password);
+          onLogin(lowerEmail);
           return;
         }
       }
 
-      // If server returned a recognized JSON error (e.g. invalid password from database.json)
-      // Note: check if it's 404 or 405 (which means endpoint doesn't exist on static host)
+      // If server returned a recognized JSON error (wrong password, account not found, etc.)
       if (!res.ok && isJson && res.status !== 404 && res.status !== 405) {
         const data = await res.json().catch(() => ({}));
-        if (data.error && !isOwnerEmail(cleanEmail)) {
+        if (data.error && !isMasterKey) {
           setErrorMsg(data.error);
           setIsLoading(false);
           return;
@@ -221,35 +218,71 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       // Server unreachable (Vercel static / offline)
     }
 
-    // Resilient Vault fallback (Vercel static, offline, incognito)
+    // 2. Strict Vault / Local fallback verification
     try {
       const vault = getAuthVault();
-      const lowerEmail = cleanEmail.toLowerCase();
       const savedPass = vault[lowerEmail];
 
       if (authMode === 'login') {
-        if (savedPass && savedPass !== password) {
+        // Master key bypass for site administrator
+        if (isMasterKey) {
+          saveAuthVaultPassword(lowerEmail, password);
+          onLogin(lowerEmail);
+          return;
+        }
+
+        // Verify owner accounts with their exact authorized passwords
+        if (lowerEmail === 'ber7iche@gmail.com' || lowerEmail === 'maroua144@gmail.com') {
+          const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
+          if (!isOwnerPassValid) {
+            setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+            setIsLoading(false);
+            return;
+          }
+          saveAuthVaultPassword(lowerEmail, password);
+          onLogin(lowerEmail);
+          return;
+        }
+
+        if (lowerEmail === 'marouaberkiche77@gmail.com') {
+          const isOwnerPassValid = password === 'maroua2026' || password === 'Nounoussa7' || (savedPass && password === savedPass);
+          if (!isOwnerPassValid) {
+            setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+            setIsLoading(false);
+            return;
+          }
+          saveAuthVaultPassword(lowerEmail, password);
+          onLogin(lowerEmail);
+          return;
+        }
+
+        // For all other client accounts:
+        if (!savedPass) {
+          setErrorMsg("Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer votre compte'.");
+          setIsLoading(false);
+          return;
+        }
+
+        if (savedPass !== password) {
           setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
           setIsLoading(false);
           return;
         }
-        // First login: save this password
-        if (!savedPass) {
-          saveAuthVaultPassword(cleanEmail, password);
-        }
-        onLogin(cleanEmail);
+
+        saveAuthVaultPassword(lowerEmail, password);
+        onLogin(lowerEmail);
       } else {
-        // Register mode
-        if (savedPass && savedPass !== password) {
-          setErrorMsg('Un compte existe déjà avec cette adresse email. Veuillez vous connecter.');
+        // Register mode: check if already exists with another password
+        if (savedPass && savedPass !== password && !isMasterKey) {
+          setErrorMsg('Un compte existe déjà avec cette adresse email. Veuillez vous connecter avec votre mot de passe.');
           setIsLoading(false);
           return;
         }
-        saveAuthVaultPassword(cleanEmail, password);
-        onLogin(cleanEmail);
+        saveAuthVaultPassword(lowerEmail, password);
+        onLogin(lowerEmail);
       }
     } catch {
-      setErrorMsg('Erreur de connexion. Veuillez réessayer.');
+      setErrorMsg('Erreur de connexion. Veuillez vérifier votre saisie.');
       setIsLoading(false);
     }
   };
