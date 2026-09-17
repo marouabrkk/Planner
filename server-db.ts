@@ -38,9 +38,9 @@ const DEFAULT_DB: DatabaseSchema = {
     }
   ],
   paymentSettings: {
-    baridiMob: '0079999900XXXXXXXXX',
-    ccp: 'XXXXXXX Clé XX',
-    contact: '@VotreContact (WhatsApp / Instagram)'
+    baridiMob: '00799999002934604547',
+    ccp: '',
+    contact: '@maroua144 (Telegram)'
   },
   userData: {}
 };

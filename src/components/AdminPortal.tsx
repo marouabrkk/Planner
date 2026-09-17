@@ -759,34 +759,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
 
             <form onSubmit={handleSavePayment} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-300">Numéro BaridiMob</label>
+                <label className="text-xs font-bold text-slate-300">Numéro RIP BaridiMob</label>
                 <input
                   type="text"
                   value={paymentSettings.baridiMob}
                   onChange={(e) => setPaymentSettings({ ...paymentSettings, baridiMob: e.target.value })}
-                  placeholder="Ex: 0079999900XXXXXXXXX"
+                  placeholder="00799999002934604547"
                   className="bg-[#141826] border border-[#22293d] focus:border-amber-500 text-white text-xs px-3.5 py-2.5 rounded-xl outline-none font-mono"
                 />
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-300">Numéro CCP & Clé</label>
-                <input
-                  type="text"
-                  value={paymentSettings.ccp}
-                  onChange={(e) => setPaymentSettings({ ...paymentSettings, ccp: e.target.value })}
-                  placeholder="Ex: 12345678 Clé 99"
-                  className="bg-[#141826] border border-[#22293d] focus:border-amber-500 text-white text-xs px-3.5 py-2.5 rounded-xl outline-none font-mono"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-300">Contact Réception Reçus (WhatsApp / Instagram)</label>
+                <label className="text-xs font-bold text-slate-300">Contact Réception Reçus (Telegram)</label>
                 <input
                   type="text"
                   value={paymentSettings.contact}
                   onChange={(e) => setPaymentSettings({ ...paymentSettings, contact: e.target.value })}
-                  placeholder="Ex: @VotreContact ou +213 XXXXXXXX"
+                  placeholder="@maroua144"
                   className="bg-[#141826] border border-[#22293d] focus:border-amber-500 text-white text-xs px-3.5 py-2.5 rounded-xl outline-none"
                 />
               </div>

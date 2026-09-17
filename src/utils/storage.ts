@@ -4,9 +4,9 @@ import { User, UserData, PaymentSettings } from '../types';
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
 
 export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
-  baridiMob: '0079999900XXXXXXXXX',
-  ccp: 'XXXXXXX Clé XX',
-  contact: '@VotreContact (WhatsApp / Instagram)'
+  baridiMob: '00799999002934604547',
+  ccp: '',
+  contact: '@maroua144 (Telegram)'
 };
 
 export function getTodayStr(): string {

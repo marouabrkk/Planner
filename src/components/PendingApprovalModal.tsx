@@ -89,46 +89,57 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
 
         {/* Payment Details Box */}
         <div className="bg-[#171c2c] border border-dashed border-[#22293d] p-4 rounded-xl text-left text-xs text-slate-200 flex flex-col gap-2.5">
-          <div className="font-bold text-amber-400 flex items-center gap-1.5 border-b border-[#22293d] pb-2">
-            <span>💳 Coordonnées de paiement officiel</span>
+          <div className="font-bold text-amber-400 flex items-center justify-between border-b border-[#22293d] pb-2">
+            <span>💳 Paiement BaridiMob (RIP)</span>
+            <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-md font-semibold border border-amber-500/30">Instantané</span>
           </div>
 
-          <div className="flex items-center justify-between gap-2 bg-[#1f263b] p-2.5 rounded-lg border border-[#22293d]">
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold block">BaridiMob</span>
-              <span className="font-mono text-xs font-semibold text-cyan-300">{livePaymentSettings.baridiMob}</span>
+          {/* BaridiMob RIP Box */}
+          <div className="flex items-center justify-between gap-2 bg-[#1f263b] p-3 rounded-xl border border-cyan-500/30 shadow-inner">
+            <div className="overflow-hidden">
+              <span className="text-[10px] text-slate-400 uppercase font-bold block mb-0.5 tracking-wider">RIP BaridiMob</span>
+              <span className="font-mono text-xs sm:text-sm font-black text-cyan-300 select-all tracking-wider break-all">
+                {livePaymentSettings.baridiMob || '00799999002934604547'}
+              </span>
             </div>
             <button
               type="button"
-              onClick={() => copyToClipboard(livePaymentSettings.baridiMob, 'baridimob')}
-              className="p-1.5 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-              title="Copier le numéro"
+              onClick={() => copyToClipboard(livePaymentSettings.baridiMob || '00799999002934604547', 'baridimob')}
+              className="p-2 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 transition-colors shrink-0 flex items-center gap-1 cursor-pointer border border-cyan-500/30 text-[11px] font-bold"
+              title="Copier le RIP"
             >
-              {copiedField === 'baridimob' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+              {copiedField === 'baridimob' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Copié</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copier</span>
+                </>
+              )}
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-2 bg-[#1f263b] p-2.5 rounded-lg border border-[#22293d]">
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold block">CCP</span>
-              <span className="font-mono text-xs font-semibold text-cyan-300">{livePaymentSettings.ccp}</span>
+          {/* Telegram Instructions Box */}
+          <div className="bg-[#172133] border border-sky-500/30 p-3 rounded-xl flex flex-col gap-1.5 text-[11px] text-slate-300">
+            <div className="font-semibold text-sky-400 flex items-center gap-1.5">
+              <MessageCircle className="w-4 h-4 text-sky-400" />
+              <span>Activation de votre accès :</span>
             </div>
-            <button
-              type="button"
-              onClick={() => copyToClipboard(livePaymentSettings.ccp, 'ccp')}
-              className="p-1.5 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-              title="Copier le numéro CCP"
+            <p className="leading-relaxed text-slate-300">
+              Une fois le virement effectué via BaridiMob, envoyez la <strong>capture / preuve de paiement</strong> avec votre email (<strong className="text-white">{userEmail}</strong>) sur Telegram :
+            </p>
+            <a
+              href="https://t.me/maroua144"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center justify-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold px-3 py-2 rounded-lg transition-all text-xs"
             >
-              {copiedField === 'ccp' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            </button>
-          </div>
-
-          <div className="text-[11px] text-slate-300 pt-1 leading-relaxed">
-            • Une fois le virement effectué, transmettez la capture du reçu avec votre email (<strong className="text-white">{userEmail}</strong>) à notre support :
-            <div className="mt-1 text-amber-300 font-semibold flex items-center gap-1">
-              <MessageCircle className="w-3.5 h-3.5" />
-              <span>{livePaymentSettings.contact}</span>
-            </div>
+              <span>Telegram : @maroua144</span>
+              <span className="text-[10px] text-sky-200 underline">Ouvrir ↗</span>
+            </a>
           </div>
         </div>
 
