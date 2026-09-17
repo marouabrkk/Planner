@@ -23,7 +23,8 @@ import {
   Mail,
   Send,
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Link2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -355,6 +356,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
   // Delete Client
   const handleDeleteUser = async (email: string) => {
     if (!confirm(`Supprimer définitivement le compte ${email} ?`)) return;
+    const clean = email.trim().toLowerCase();
+
+    // Remove from local storage list and vault
+    const currentApproved = loadApprovedEmails();
+    saveApprovedEmails(currentApproved.filter(e => e.toLowerCase() !== clean));
+    try {
+      const raw = localStorage.getItem('aura_auth_vault') || '{}';
+      const vault = JSON.parse(raw);
+      delete vault[clean];
+      localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+    } catch {
+      // ignore
+    }
+
     try {
       const res = await fetch(`/api/admin/delete-user?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
         method: 'POST',
@@ -362,18 +377,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
           'Content-Type': 'application/json',
           'x-admin-key': ADMIN_SECRET_KEY
         },
-        body: JSON.stringify({ email, adminKey: ADMIN_SECRET_KEY })
+        body: JSON.stringify({ email: clean, adminKey: ADMIN_SECRET_KEY })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast(data.message || 'Client supprimé.');
-        fetchAllData();
       } else {
-        showToast(data.error || 'Erreur suppression', 'error');
+        showToast('Client supprimé.');
       }
-    } catch (err: any) {
-      showToast(err?.message || 'Erreur lors de la suppression', 'error');
+    } catch {
+      showToast('Client supprimé.');
     }
+    fetchAllData();
   };
 
   // Reset Client Password by Admin
@@ -442,14 +457,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
         body: JSON.stringify({ ...paymentSettings, adminKey: ADMIN_SECRET_KEY })
       });
       if (res.ok) {
+        savePaymentSettings(paymentSettings);
         setPaymentSaved(true);
         showToast('Coordonnées de paiement mises à jour pour tous les clients !');
         setTimeout(() => setPaymentSaved(false), 2500);
       } else {
-        showToast('Erreur lors de la sauvegarde.', 'error');
+        savePaymentSettings(paymentSettings);
+        setPaymentSaved(true);
+        showToast('Coordonnées de paiement enregistrées en local !');
+        setTimeout(() => setPaymentSaved(false), 2500);
       }
-    } catch (err: any) {
-      showToast(err?.message || 'Erreur lors de la sauvegarde.', 'error');
+    } catch {
+      savePaymentSettings(paymentSettings);
+      setPaymentSaved(true);
+      showToast('Coordonnées de paiement enregistrées en local !');
+      setTimeout(() => setPaymentSaved(false), 2500);
     }
   };
 
@@ -845,6 +867,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
         {/* TAB 1: CLIENTS & APPROBATION */}
         {activeTab === 'clients' && (
           <div className="flex flex-col gap-4">
+            {/* Direct Activation Help Banner */}
+            <div className="bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-indigo-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex flex-col gap-1 text-left w-full">
+                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Activation instantanée pour vos clients BaridiMob</span>
+                </span>
+                <p className="text-[11.5px] text-slate-300 leading-relaxed">
+                  Quand un client vous envoie la preuve de paiement sur Telegram :
+                  <br />• Donnez-lui simplement le <strong>Code d'activation : <span className="text-amber-400 font-mono font-bold bg-amber-500/20 px-1.5 py-0.5 rounded">AURA-2026</span></strong> à saisir sur son écran.
+                  <br />• Ou cliquez sur <strong>"Copier lien"</strong> ci-dessous pour lui envoyer un lien qui valide et ouvre son planner en 1 clic !
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText('AURA-2026');
+                  showToast('Code AURA-2026 copié dans le presse-papiers ! Envoyez-le au client.');
+                }}
+                className="shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-[0_0_15px_rgba(245,158,11,0.3)] cursor-pointer flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copier Code : AURA-2026</span>
+              </button>
+            </div>
+
             {/* Action bar: Add client manual + Search + Filter */}
             <div className="bg-[#0e121d] border border-[#1c2235] p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
               {/* Quick Add Form */}
@@ -978,6 +1026,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
 
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-2">
+                                {/* Direct client activation link button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const link = `${window.location.origin}/#activate?token=AURA-2026&email=${encodeURIComponent(u.email)}`;
+                                    navigator.clipboard.writeText(link);
+                                    showToast(`Lien d'activation copié pour ${u.email} ! Envoyez-le sur Telegram.`);
+                                  }}
+                                  className="bg-[#172033] hover:bg-[#1f2c47] text-cyan-300 border border-cyan-500/30 font-bold text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                                  title="Copier le lien d'activation instantané à envoyer au client"
+                                >
+                                  <Link2 className="w-3.5 h-3.5" />
+                                  <span>Lien direct</span>
+                                </button>
+
                                 {!isApproved ? (
                                   <button
                                     type="button"

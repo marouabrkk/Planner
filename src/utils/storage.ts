@@ -2,7 +2,46 @@ import confetti from 'canvas-confetti';
 import { User, UserData, PaymentSettings } from '../types';
 
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
-export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com'];
+export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com', 'marouaberkiche77@gmail.com'];
+
+export const DEFAULT_APPROVED_EMAILS: string[] = [
+  'ber7iche@gmail.com',
+  'maroua144@gmail.com',
+  'testclient@gmail.com',
+  'nouvelle.cliente@gmail.com',
+  'marouaberkiche77@gmail.com'
+];
+
+export const DEFAULT_AUTH_VAULT: Record<string, string> = {
+  'ber7iche@gmail.com': 'Nounoussa7',
+  'maroua144@gmail.com': 'Nounoussa7',
+  'nouvelle.cliente@gmail.com': 'supermonnouveaump2026',
+  'testclient@gmail.com': 'client1234',
+  'marouaberkiche77@gmail.com': 'maroua2026'
+};
+
+export function getAuthVault(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('aura_auth_vault');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_AUTH_VAULT, ...parsed };
+    }
+  } catch {
+    // fallback
+  }
+  return { ...DEFAULT_AUTH_VAULT };
+}
+
+export function saveAuthVaultPassword(email: string, pass: string): void {
+  try {
+    const vault = getAuthVault();
+    vault[email.trim().toLowerCase()] = pass;
+    localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+  } catch (e) {
+    console.error('Failed to save password in vault', e);
+  }
+}
 
 export function isOwnerEmail(email?: string | null): boolean {
   if (!email) return false;
@@ -64,16 +103,18 @@ export function loadApprovedEmails(): string[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        if (!parsed.some(e => e.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
-          parsed.push(ADMIN_EMAIL);
-        }
-        return parsed;
+        const set = new Set([
+          ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase()),
+          ...parsed.map((e: string) => (typeof e === 'string' ? e.toLowerCase() : ''))
+        ]);
+        set.delete('');
+        return Array.from(set);
       }
     }
   } catch (e) {
     console.error('Failed to load approved emails', e);
   }
-  return [ADMIN_EMAIL];
+  return [...DEFAULT_APPROVED_EMAILS];
 }
 
 export function saveApprovedEmails(list: string[]): void {

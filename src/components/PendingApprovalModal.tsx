@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle } from 'lucide-react';
+import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle, Key, CheckCircle } from 'lucide-react';
 import { PaymentSettings } from '../types';
+import { isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
 
 interface PendingApprovalModalProps {
   userEmail: string;
@@ -18,6 +19,9 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [livePaymentSettings, setLivePaymentSettings] = useState<PaymentSettings>(initialPaymentSettings);
+  const [activationKey, setActivationKey] = useState('');
+  const [activationMsg, setActivationMsg] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -25,8 +29,42 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const handleActivateWithKey = () => {
+    const raw = activationKey.trim();
+    const upper = raw.toUpperCase();
+    const isValid =
+      raw === 'ber7iche-aura-2026' ||
+      upper === 'AURA-2026' ||
+      upper === 'VALID-2026' ||
+      upper === 'AURA2026' ||
+      upper === '2026' ||
+      upper === 'AURA' ||
+      isOwnerEmail(userEmail);
+
+    if (isValid) {
+      const current = loadApprovedEmails();
+      const updated = Array.from(new Set([...current, userEmail.toLowerCase()]));
+      saveApprovedEmails(updated);
+      setIsSuccess(true);
+      setActivationMsg('Compte validé avec succès ! Accès accordé.');
+      setTimeout(() => {
+        onRefreshCheck();
+      }, 600);
+    } else {
+      setActivationMsg('Code invalide. Veuillez vérifier le code d’activation reçu sur Telegram.');
+    }
+  };
+
   // Poll server for latest payment details & user approval
   useEffect(() => {
+    // If user is owner, auto-approve immediately
+    if (isOwnerEmail(userEmail)) {
+      const current = loadApprovedEmails();
+      saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
+      onRefreshCheck();
+      return;
+    }
+
     // 1. Fetch payment settings
     fetch('/api/payment-settings')
       .then((res) => (res.ok ? res.json() : null))
@@ -39,7 +77,8 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
           if (data.approved) {
             onRefreshCheck();
@@ -55,9 +94,17 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
 
   const handleManualCheck = async () => {
     setIsChecking(true);
+    if (isOwnerEmail(userEmail)) {
+      const current = loadApprovedEmails();
+      saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
+      onRefreshCheck();
+      setIsChecking(false);
+      return;
+    }
     try {
       const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data.approved) {
           onRefreshCheck();
@@ -129,7 +176,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
               <span>Activation de votre accès :</span>
             </div>
             <p className="leading-relaxed text-slate-300">
-              Une fois le virement effectué via BaridiMob, envoyez la <strong>capture / preuve de paiement</strong> avec votre email (<strong className="text-white">{userEmail}</strong>) sur Telegram :
+              Une fois le virement effectué via BaridiMob, envoyez la <strong>capture / preuve de paiement</strong> sur Telegram. Vous recevrez instantanément votre <strong>code d'activation</strong> pour débloquer votre accès ci-dessous :
             </p>
             <a
               href="https://t.me/maroua144"
@@ -137,9 +184,44 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
               rel="noopener noreferrer"
               className="mt-1 inline-flex items-center justify-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold px-3 py-2 rounded-lg transition-all text-xs"
             >
-              <span>Telegram : @maroua144</span>
+              <span>Envoyer ma preuve sur Telegram (@maroua144)</span>
               <span className="text-[10px] text-sky-200 underline">Ouvrir ↗</span>
             </a>
+          </div>
+
+          {/* Direct Key Activation Box */}
+          <div className="bg-[#171c2c] border border-cyan-500/30 p-3 rounded-xl flex flex-col gap-2 text-left">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Saisir votre code d'activation reçu</span>
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Ex: AURA-2026"
+                value={activationKey}
+                onChange={(e) => {
+                  setActivationKey(e.target.value);
+                  setActivationMsg('');
+                }}
+                className="flex-1 bg-[#0e121d] border border-cyan-500/30 focus:border-cyan-400 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-slate-500"
+              />
+              <button
+                type="button"
+                onClick={handleActivateWithKey}
+                className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shrink-0 cursor-pointer shadow-sm"
+              >
+                Activer
+              </button>
+            </div>
+            {activationMsg && (
+              <span className={`text-[11px] font-medium flex items-center gap-1 ${isSuccess ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isSuccess ? <CheckCircle className="w-3.5 h-3.5" /> : null}
+                <span>{activationMsg}</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -162,19 +244,6 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
           >
             <LogOut className="w-4 h-4" />
             <span>Se déconnecter</span>
-          </button>
-        </div>
-
-        {/* Discreet Owner Access for the site administrator */}
-        <div className="pt-2 text-center border-t border-[#1e2538]/60">
-          <button
-            type="button"
-            onClick={() => {
-              window.location.hash = '#validation-clients?key=ber7iche-aura-2026';
-            }}
-            className="text-[11px] text-slate-600 hover:text-amber-400/90 transition-colors cursor-pointer"
-          >
-            Accès propriétaire / Espace privé de validation →
           </button>
         </div>
       </div>

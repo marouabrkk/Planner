@@ -3,6 +3,7 @@ import { User, UserData, PaymentSettings, Task, Course, Habit } from './types';
 import {
   ADMIN_EMAIL,
   ADMIN_EMAILS,
+  DEFAULT_APPROVED_EMAILS,
   isOwnerEmail,
   getTodayStr,
   getInitialUserData,
@@ -98,22 +99,69 @@ export default function App() {
   const refreshApprovalStatus = async () => {
     try {
       const res = await fetch('/api/auth/approved-emails');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (Array.isArray(data.emails)) {
-          const approved = data.emails.map((e: string) => e.toLowerCase());
+          const approved = Array.from(new Set([
+            ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase()),
+            ...data.emails.map((e: string) => e.toLowerCase())
+          ]));
           setApprovedEmails(approved);
           saveApprovedEmails(approved);
+          return;
         }
       }
     } catch {
       // fallback to localStorage
     }
+    const local = loadApprovedEmails();
+    setApprovedEmails(local);
   };
 
   useEffect(() => {
     refreshApprovalStatus();
   }, []);
+
+  // Listen for direct URL activation tokens (#activate?token=AURA-2026&email=...)
+  useEffect(() => {
+    try {
+      const href = window.location.href;
+      const isActivation =
+        href.includes('activate') ||
+        href.includes('token=AURA-2026') ||
+        href.includes('token=VALID-2026') ||
+        href.includes('token=ber7iche-aura-2026');
+
+      if (isActivation) {
+        let targetEmail = '';
+        try {
+          const urlObj = new URL(href.replace('#', '?'));
+          targetEmail = (urlObj.searchParams.get('email') || '').trim().toLowerCase();
+        } catch {
+          // ignore
+        }
+
+        const emailToApprove = targetEmail || currentUser?.email?.toLowerCase();
+        if (emailToApprove) {
+          const current = loadApprovedEmails();
+          const updated = Array.from(new Set([...current, emailToApprove]));
+          saveApprovedEmails(updated);
+          setApprovedEmails(updated);
+
+          if (!currentUser && targetEmail) {
+            handleLogin(targetEmail);
+          }
+        }
+
+        if (!href.includes('validation') && !href.includes('admin')) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentUser?.email]);
 
   // When current user changes, reload their partitioned data
   useEffect(() => {
@@ -143,12 +191,15 @@ export default function App() {
     localStorage.setItem('aura_current_user', JSON.stringify(user));
     setCurrentUser(user);
 
-    // Auto-approve if owner
-    if (isOwner) {
-      const updated = Array.from(new Set([...approvedEmails, email.toLowerCase(), ...ADMIN_EMAILS]));
-      setApprovedEmails(updated);
-      saveApprovedEmails(updated);
-    }
+    // Auto-approve if owner or in default list
+    const updated = Array.from(new Set([
+      ...approvedEmails,
+      email.toLowerCase(),
+      ...ADMIN_EMAILS.map(e => e.toLowerCase()),
+      ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase())
+    ]));
+    setApprovedEmails(updated);
+    saveApprovedEmails(updated);
     refreshApprovalStatus();
   };
 
@@ -408,7 +459,7 @@ export default function App() {
       )}
 
       {/* 2. Pending Approval Overlay if logged in but not approved */}
-      {currentUser && !isApproved && (
+      {currentUser && !isApproved && !isOwnerEmail(currentUser.email) && (
         <PendingApprovalModal
           userEmail={currentUser.email}
           paymentSettings={paymentSettings}

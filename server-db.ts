@@ -32,9 +32,10 @@ export interface DatabaseSchema {
   userData: Record<string, any>;
 }
 
-const DB_FILE = path.join(process.cwd(), 'database.json');
+const isVercel = Boolean(process.env.VERCEL);
+const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(process.cwd(), 'database.json');
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
-export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com'];
+export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com', 'marouaberkiche77@gmail.com'];
 
 export function isOwnerEmail(email: string): boolean {
   if (!email) return false;
@@ -64,6 +65,17 @@ const DEFAULT_DB: DatabaseSchema = {
 export function readDb(): DatabaseSchema {
   try {
     if (!fs.existsSync(DB_FILE)) {
+      const rootDbFile = path.join(process.cwd(), 'database.json');
+      if (isVercel && fs.existsSync(rootDbFile)) {
+        try {
+          const rootData = fs.readFileSync(rootDbFile, 'utf-8');
+          const parsed = JSON.parse(rootData);
+          writeDb(parsed);
+          return parsed;
+        } catch {
+          // fallback
+        }
+      }
       writeDb(DEFAULT_DB);
       return DEFAULT_DB;
     }
