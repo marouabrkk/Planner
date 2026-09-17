@@ -1,0 +1,52 @@
+{
+  "users": [
+    {
+      "id": "admin_owner",
+      "email": "ber7iche@gmail.com",
+      "status": "approved",
+      "role": "admin",
+      "createdAt": "2026-09-17T01:10:03.326Z",
+      "approvedAt": "2026-09-17T01:10:03.326Z",
+      "password": "إخعرخعسسض&"
+    },
+    {
+      "id": "u_dGVzdGNsaWVudEBnbWFpbC5jb20",
+      "email": "testclient@gmail.com",
+      "status": "approved",
+      "role": "client",
+      "createdAt": "2026-09-17T01:29:50.349Z",
+      "approvedAt": "2026-09-17T01:29:50.349Z"
+    },
+    {
+      "id": "admin_bWFyb3VhMTQ0QGdtYWlsLmNvbQ",
+      "email": "maroua144@gmail.com",
+      "status": "approved",
+      "role": "admin",
+      "createdAt": "2026-09-17T01:31:49.015Z",
+      "approvedAt": "2026-09-17T01:31:49.015Z"
+    },
+    {
+      "id": "u_bm91dmVsbGUuY2xpZW50ZUBnbWFpbC5jb20",
+      "email": "nouvelle.cliente@gmail.com",
+      "password": "supermonnouveaump2026",
+      "status": "approved",
+      "role": "client",
+      "createdAt": "2026-09-17T01:31:49.015Z",
+      "approvedAt": "2026-09-17T01:31:53.200Z"
+    },
+    {
+      "id": "u_bWFyb3VhYmVya2ljaGU3N0BnbWFpbC5jb20",
+      "email": "marouaberkiche77@gmail.com",
+      "status": "approved",
+      "role": "client",
+      "createdAt": "2026-09-17T19:30:10.147Z",
+      "approvedAt": "2026-09-17T19:31:27.698Z"
+    }
+  ],
+  "paymentSettings": {
+    "baridiMob": "00799999002934604547",
+    "ccp": "",
+    "contact": "@maroua144 (Telegram)"
+  },
+  "userData": {}
+}

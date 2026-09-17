@@ -2,6 +2,13 @@ import confetti from 'canvas-confetti';
 import { User, UserData, PaymentSettings } from '../types';
 
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
+export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com'];
+
+export function isOwnerEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return ADMIN_EMAILS.includes(clean);
+}
 
 export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
   baridiMob: '00799999002934604547',

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { User, UserData, PaymentSettings, Task, Course, Habit } from './types';
 import {
   ADMIN_EMAIL,
+  ADMIN_EMAILS,
+  isOwnerEmail,
   getTodayStr,
   getInitialUserData,
   loadApprovedEmails,
@@ -27,15 +29,23 @@ export default function App() {
 
   // Route state: Check if on dedicated secret admin site
   const checkIsAdminRoute = () => {
-    const hash = window.location.hash.toLowerCase();
-    const path = window.location.pathname.toLowerCase();
-    const search = window.location.search.toLowerCase();
-    return (
-      hash.includes('validation') ||
-      hash.includes('admin') ||
-      path.includes('admin') ||
-      search.includes('admin')
-    );
+    try {
+      const hash = (window.location.hash || '').toLowerCase();
+      const path = (window.location.pathname || '').toLowerCase();
+      const search = (window.location.search || '').toLowerCase();
+      return (
+        hash.includes('validation') ||
+        hash.includes('admin') ||
+        hash.includes('espace-prive') ||
+        hash.includes('ber7iche') ||
+        path.includes('admin') ||
+        search.includes('admin') ||
+        search.includes('validation') ||
+        search.includes('ber7iche')
+      );
+    } catch {
+      return false;
+    }
   };
 
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminRoute);
@@ -123,7 +133,7 @@ export default function App() {
 
   // Auth Handlers
   const handleLogin = (email: string) => {
-    const isOwner = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const isOwner = isOwnerEmail(email);
     const user: User = {
       email,
       id: 'u_' + btoa(email.toLowerCase()).replace(/=/g, ''),
@@ -134,11 +144,12 @@ export default function App() {
     setCurrentUser(user);
 
     // Auto-approve if owner
-    if (isOwner && !approvedEmails.some((e) => e.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
-      const updated = [...approvedEmails, ADMIN_EMAIL];
+    if (isOwner) {
+      const updated = Array.from(new Set([...approvedEmails, email.toLowerCase(), ...ADMIN_EMAILS]));
       setApprovedEmails(updated);
       saveApprovedEmails(updated);
     }
+    refreshApprovalStatus();
   };
 
   const handleLogout = () => {
@@ -149,8 +160,8 @@ export default function App() {
   // Check if current user is approved
   const isApproved =
     currentUser &&
-    (approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()) ||
-      currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+    (isOwnerEmail(currentUser.email) ||
+      approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()));
 
   // ================= Task Handlers =================
   const handleAddTask = (title: string, targetDate?: string) => {

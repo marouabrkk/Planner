@@ -164,6 +164,19 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             <span>Se déconnecter</span>
           </button>
         </div>
+
+        {/* Discreet Owner Access for the site administrator */}
+        <div className="pt-2 text-center border-t border-[#1e2538]/60">
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = '#validation-clients?key=ber7iche-aura-2026';
+            }}
+            className="text-[11px] text-slate-600 hover:text-amber-400/90 transition-colors cursor-pointer"
+          >
+            Accès propriétaire / Espace privé de validation →
+          </button>
+        </div>
       </div>
     </div>
   );

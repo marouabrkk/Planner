@@ -17,14 +17,30 @@ export interface PaymentConfig {
   contact: string;
 }
 
+export interface SmtpConfig {
+  user: string;
+  pass: string;
+  fromName?: string;
+  service?: string;
+  updatedAt?: string;
+}
+
 export interface DatabaseSchema {
   users: StoredUser[];
   paymentSettings: PaymentConfig;
+  smtpSettings?: SmtpConfig;
   userData: Record<string, any>;
 }
 
 const DB_FILE = path.join(process.cwd(), 'database.json');
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
+export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com'];
+
+export function isOwnerEmail(email: string): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return ADMIN_EMAILS.includes(clean);
+}
 
 const DEFAULT_DB: DatabaseSchema = {
   users: [
@@ -54,18 +70,24 @@ export function readDb(): DatabaseSchema {
     const data = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed: DatabaseSchema = JSON.parse(data);
 
-    // Ensure admin is always present and approved
-    if (!parsed.users.some(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
-      parsed.users.unshift({
-        id: 'admin_owner',
-        email: ADMIN_EMAIL,
-        status: 'approved',
-        role: 'admin',
-        createdAt: new Date().toISOString(),
-        approvedAt: new Date().toISOString()
-      });
-      writeDb(parsed);
-    }
+    // Ensure admins are always present and approved
+    ADMIN_EMAILS.forEach((adm) => {
+      const existing = parsed.users.find(u => u.email.toLowerCase() === adm.toLowerCase());
+      if (!existing) {
+        parsed.users.push({
+          id: 'admin_' + Buffer.from(adm).toString('base64').replace(/=/g, ''),
+          email: adm,
+          status: 'approved',
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          approvedAt: new Date().toISOString()
+        });
+      } else {
+        existing.status = 'approved';
+        existing.role = 'admin';
+      }
+    });
+
     return parsed;
   } catch (err) {
     console.error('Error reading database:', err);

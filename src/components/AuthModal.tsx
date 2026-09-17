@@ -1,20 +1,36 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, KeyRound, ArrowLeft, Send, RefreshCw, Sparkles, ExternalLink } from 'lucide-react';
 
 interface AuthModalProps {
   onLogin: (email: string) => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const [isEmailDelivered, setIsEmailDelivered] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Timer cooldown for resend button
+  React.useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+
+  // Request 6-digit code by email
+  const handleRequestCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
     const cleanEmail = email.trim();
     if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -22,12 +38,165 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       return;
     }
 
-    if (!password || password.length < 6) {
-      setErrorMsg('Le mot de passe doit contenir au moins 6 caractères.');
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/send-reset-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErrorMsg(data.error || "Aucun compte n'a été trouvé avec cette adresse email.");
+        setIsLoading(false);
+        return;
+      }
+
+      setForgotStep('verify');
+      setResendCooldown(30);
+      setIsEmailDelivered(Boolean(data.delivered));
+      if (data.previewCode) {
+        setPreviewCode(data.previewCode);
+      } else {
+        setPreviewCode(null);
+      }
+      setSuccessMsg(
+        data.delivered
+          ? `Code secret envoyé dans votre boîte Gmail (${cleanEmail}) !`
+          : data.message || 'Code de sécurité généré !'
+      );
+    } catch {
+      // Offline fallback: generate demo code
+      const demoCode = Math.floor(100000 + Math.random() * 900000).toString();
+      setPreviewCode(demoCode);
+      setIsEmailDelivered(false);
+      try {
+        const raw = localStorage.getItem('aura_reset_codes') || '{}';
+        const store = JSON.parse(raw);
+        store[cleanEmail.toLowerCase()] = demoCode;
+        localStorage.setItem('aura_reset_codes', JSON.stringify(store));
+      } catch {
+        // ignore
+      }
+      setForgotStep('verify');
+      setResendCooldown(30);
+      setSuccessMsg('Code de vérification généré !');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Verify 6-digit code and save new password
+  const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const cleanEmail = email.trim();
+    const cleanCode = resetCode.trim().replace(/\s+/g, '');
+
+    if (!cleanCode || cleanCode.length !== 6) {
+      setErrorMsg('Veuillez entrer le code de sécurité à 6 chiffres.');
+      return;
+    }
+
+    if (!password || password.length < 4) {
+      setErrorMsg('Le nouveau mot de passe doit comporter au moins 4 caractères.');
       return;
     }
 
     setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/verify-reset-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanCode,
+          newPassword: password
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // If server failed, check offline storage
+        try {
+          const raw = localStorage.getItem('aura_reset_codes') || '{}';
+          const store = JSON.parse(raw);
+          if (store[cleanEmail.toLowerCase()] === cleanCode) {
+            // Valid local code
+            const vaultRaw = localStorage.getItem('aura_auth_vault') || '{}';
+            const vault = JSON.parse(vaultRaw);
+            vault[cleanEmail.toLowerCase()] = password;
+            localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+            setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion...');
+            setTimeout(() => onLogin(cleanEmail), 1000);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        setErrorMsg(data.error || 'Code invalide ou expiré.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Update local vault as well
+      try {
+        const vaultRaw = localStorage.getItem('aura_auth_vault') || '{}';
+        const vault = JSON.parse(vaultRaw);
+        vault[cleanEmail.toLowerCase()] = password;
+        localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+      } catch {
+        // ignore
+      }
+
+      setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
+      setTimeout(() => onLogin(cleanEmail), 1200);
+    } catch {
+      // Offline fallback
+      try {
+        const raw = localStorage.getItem('aura_reset_codes') || '{}';
+        const store = JSON.parse(raw);
+        if (store[cleanEmail.toLowerCase()] === cleanCode) {
+          const vaultRaw = localStorage.getItem('aura_auth_vault') || '{}';
+          const vault = JSON.parse(vaultRaw);
+          vault[cleanEmail.toLowerCase()] = password;
+          localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+          setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion...');
+          setTimeout(() => onLogin(cleanEmail), 1000);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      setErrorMsg('Code de vérification incorrect.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStandardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMsg('Veuillez renseigner une adresse email valide.');
+      return;
+    }
+
+    if (!password || password.length < 4) {
+      setErrorMsg('Veuillez renseigner un mot de passe (au moins 4 caractères).');
+      return;
+    }
+
+    setIsLoading(true);
+
+    // Mode: Login ou Register
     try {
       const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const res = await fetch(endpoint, {
@@ -36,17 +205,57 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         body: JSON.stringify({ email: cleanEmail, password })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setErrorMsg(data.error || 'Erreur lors de la connexion.');
+        setErrorMsg(data.error || (authMode === 'login' ? 'Mot de passe ou email incorrect.' : "Erreur lors de l'inscription."));
         setIsLoading(false);
         return;
       }
 
+      // Cache locally for offline/static consistency
+      try {
+        const raw = localStorage.getItem('aura_auth_vault') || '{}';
+        const vault = JSON.parse(raw);
+        vault[cleanEmail.toLowerCase()] = password;
+        localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+      } catch {
+        // ignore
+      }
+
       onLogin(cleanEmail);
     } catch {
-      // Fallback to client-side auth if offline
-      onLogin(cleanEmail);
+      // Offline / Static Vercel Fallback: Verify against local vault
+      try {
+        const raw = localStorage.getItem('aura_auth_vault') || '{}';
+        const vault = JSON.parse(raw);
+        const lowerEmail = cleanEmail.toLowerCase();
+        const savedPass = vault[lowerEmail];
+
+        if (authMode === 'login') {
+          if (savedPass && savedPass !== password) {
+            setErrorMsg('Mot de passe incorrect. Veuillez réessayer.');
+            setIsLoading(false);
+            return;
+          }
+          if (!savedPass) {
+            vault[lowerEmail] = password;
+            localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+          }
+          onLogin(cleanEmail);
+        } else {
+          // Register mode
+          if (savedPass && savedPass !== password) {
+            setErrorMsg('Ce compte existe déjà. Veuillez vous connecter avec votre mot de passe.');
+            setIsLoading(false);
+            return;
+          }
+          vault[lowerEmail] = password;
+          localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+          onLogin(cleanEmail);
+        }
+      } catch {
+        setErrorMsg('Erreur de connexion. Veuillez réessayer.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -62,102 +271,360 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         {/* Brand Icon & Heading */}
         <div className="text-center flex flex-col items-center gap-2">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(99,102,241,0.4)] text-white">
-            ⚡
+            {authMode === 'forgot' ? (forgotStep === 'verify' ? '📩' : '🔑') : '⚡'}
           </div>
           <h2 className="text-xl font-extrabold text-white tracking-tight">
-            {authMode === 'register' ? 'Créer votre compte' : 'Connexion à votre Espace'}
+            {authMode === 'forgot'
+              ? forgotStep === 'verify'
+                ? 'Code de vérification Gmail'
+                : 'Récupération par Email'
+              : authMode === 'register'
+              ? 'Créer votre compte'
+              : 'Connexion à votre Espace'}
           </h2>
           <p className="text-xs text-slate-400 max-w-xs">
-            {authMode === 'register'
+            {authMode === 'forgot'
+              ? forgotStep === 'verify'
+                ? `Entrez le code à 6 chiffres envoyé à ${email || 'votre email'} ainsi que votre nouveau mot de passe.`
+                : 'Recevez un code de sécurité à 6 chiffres sur votre boîte de réception Gmail.'
+              : authMode === 'register'
               ? 'Créez votre compte pour enregistrer vos données en toute sécurité.'
               : 'Connectez-vous pour retrouver vos tâches, cours et habitudes.'}
           </p>
         </div>
 
-        {/* Auth Mode Tabs */}
-        <div className="flex bg-[#171c2c] border border-[#22293d] rounded-xl p-1 gap-1">
+        {/* Auth Mode Tabs (hide if in forgot mode) */}
+        {authMode !== 'forgot' ? (
+          <div className="flex bg-[#171c2c] border border-[#22293d] rounded-xl p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setErrorMsg('');
+                setSuccessMsg('');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                authMode === 'login'
+                  ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.35)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Se connecter
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('register');
+                setErrorMsg('');
+                setSuccessMsg('');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                authMode === 'register'
+                  ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.35)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Créer un compte
+            </button>
+          </div>
+        ) : (
           <button
             type="button"
             onClick={() => {
               setAuthMode('login');
+              setForgotStep('request');
               setErrorMsg('');
+              setSuccessMsg('');
+              setPreviewCode(null);
             }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-              authMode === 'login'
-                ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.35)]'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold self-start cursor-pointer transition-colors"
           >
-            Se connecter
+            <ArrowLeft className="w-4 h-4" />
+            <span>Retour à la connexion</span>
           </button>
+        )}
+
+        {/* ======================================================== */}
+        {/* CASE 1: FORGOT PASSWORD - STEP 1 (DEMANDE DU CODE EMAIL) */}
+        {/* ======================================================== */}
+        {authMode === 'forgot' && forgotStep === 'request' && (
+          <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-slate-400">Votre adresse Gmail ou Email</label>
+              <div className="relative flex items-center">
+                <Mail className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="exemple@gmail.com..."
+                  autoFocus
+                  className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {successMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{successMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full mt-2 bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl shadow-[0_0_20px_rgba(99,102,241,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>{isLoading ? 'Envoi en cours...' : 'Envoyer mon code secret par email'}</span>
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        )}
+
+        {/* ======================================================== */}
+        {/* CASE 2: FORGOT PASSWORD - STEP 2 (CODE & NOUVEAU MOT DE PASSE) */}
+        {/* ======================================================== */}
+        {authMode === 'forgot' && forgotStep === 'verify' && (
+          <form onSubmit={handleVerifyCodeAndReset} className="flex flex-col gap-3.5">
+            {/* Target email badge */}
+            <div className="flex items-center justify-between bg-[#171c2c] border border-[#22293d] px-3 py-2 rounded-xl text-xs">
+              <span className="text-slate-400 flex items-center gap-1.5 truncate">
+                <Mail className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="text-slate-200 font-medium truncate">{email}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotStep('request');
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                }}
+                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold shrink-0 ml-2 cursor-pointer"
+              >
+                Modifier
+              </button>
+            </div>
+
+            {/* Direct Gmail shortcut button */}
+            <a
+              href="https://mail.google.com"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-red-500/15 via-indigo-500/15 to-cyan-500/15 hover:from-red-500/25 hover:to-cyan-500/25 border border-cyan-500/30 text-cyan-300 py-2.5 px-3 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+            >
+              <Mail className="w-4 h-4 text-red-400 shrink-0" />
+              <span>Ouvrir Gmail (Boîte de réception)</span>
+              <ExternalLink className="w-3.5 h-3.5 ml-auto text-cyan-400 shrink-0" />
+            </a>
+
+            {/* Preview code helper (visible in preview/test if email wasn't dispatched through external SMTP) */}
+            {previewCode && (
+              <div className="bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs text-indigo-200">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
+                  <span>Code de sécurité généré :</span>
+                </span>
+                <span className="font-mono font-bold tracking-wider text-cyan-300 bg-black/40 px-2 py-0.5 rounded border border-cyan-500/30 text-sm">
+                  {previewCode}
+                </span>
+              </div>
+            )}
+
+            {/* 6-Digit Code Input */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-400">Code secret reçu (6 chiffres)</label>
+                <button
+                  type="button"
+                  disabled={resendCooldown > 0 || isLoading}
+                  onClick={() => handleRequestCode()}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:text-slate-600 font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>{resendCooldown > 0 ? `Renvoyer (${resendCooldown}s)` : 'Renvoyer le code'}</span>
+                </button>
+              </div>
+              <input
+                type="text"
+                maxLength={6}
+                value={resetCode}
+                onChange={(e) => setResetCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="123456"
+                autoFocus
+                className="w-full bg-[#171c2c] border border-indigo-500/60 focus:border-cyan-400 text-cyan-300 text-center text-lg font-mono font-bold tracking-[8px] py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-600 placeholder:tracking-normal"
+              />
+            </div>
+
+            {/* New Password Input */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-slate-400">Nouveau mot de passe</label>
+              <div className="relative flex items-center">
+                <Lock className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Votre nouveau mot de passe (min. 4 car.)..."
+                  className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {successMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{successMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full mt-1 bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl shadow-[0_0_20px_rgba(99,102,241,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>{isLoading ? 'Vérification...' : 'Valider le code & Enregistrer'}</span>
+              <CheckCircle2 className="w-4 h-4" />
+            </button>
+          </form>
+        )}
+
+        {/* ======================================================== */}
+        {/* CASE 3: STANDARD LOGIN OR REGISTER                       */}
+        {/* ======================================================== */}
+        {authMode !== 'forgot' && (
+          <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-slate-400">Adresse Email</label>
+              <div className="relative flex items-center">
+                <Mail className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Votre adresse Gmail ou Email..."
+                  className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-400">Mot de passe</label>
+                {authMode === 'login' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('forgot');
+                      setForgotStep('request');
+                      setErrorMsg('');
+                      setSuccessMsg('');
+                    }}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium transition-colors cursor-pointer"
+                  >
+                    Mot de passe oublié ?
+                  </button>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <Lock className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Votre mot de passe..."
+                  className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {successMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{successMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full mt-2 bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl shadow-[0_0_20px_rgba(99,102,241,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>
+                {isLoading
+                  ? 'Vérification...'
+                  : authMode === 'register'
+                  ? 'Créer mon compte'
+                  : 'Se connecter'}
+              </span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+        )}
+
+        {/* Telegram Direct Support Helper */}
+        {authMode === 'forgot' && (
+          <div className="bg-[#171c2c] border border-[#22293d] p-3 rounded-xl flex flex-col gap-2">
+            <span className="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              Une difficulté pour vous reconnecter ?
+            </span>
+            <p className="text-[10.5px] text-slate-400 leading-relaxed">
+              Vous pouvez contacter directement la propriétaire sur Telegram pour réinitialiser votre accès en 1 minute.
+            </p>
+            <a
+              href={`https://t.me/maroua144?text=${encodeURIComponent(
+                `Bonjour, j'ai oublié mon mot de passe pour mon compte AURA Planner (${email || 'mon email'}). Pouvez-vous m'aider ?`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#242d45] hover:bg-[#2e3957] text-cyan-300 text-xs font-bold py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Contacter le support Telegram (@maroua144)</span>
+            </a>
+          </div>
+        )}
+
+        <div className="border-t border-[#22293d] pt-3 flex flex-col items-center justify-center gap-2 text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Espace protégé AURA Master Planner</span>
+          </div>
+
           <button
             type="button"
             onClick={() => {
-              setAuthMode('register');
-              setErrorMsg('');
+              window.location.hash = '#validation-clients?key=ber7iche-aura-2026';
             }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-              authMode === 'register'
-                ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.35)]'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="text-[10px] text-slate-600 hover:text-amber-400/80 transition-colors cursor-pointer"
           >
-            Créer un compte
+            Accès propriétaire / Espace validation →
           </button>
-        </div>
-
-        {/* Inputs Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-bold text-slate-400">Adresse Email</label>
-            <div className="relative flex items-center">
-              <Mail className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Votre adresse Gmail ou Email..."
-                className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-bold text-slate-400">Mot de passe</label>
-            <div className="relative flex items-center">
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3 pointer-events-none" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Au moins 6 caractères..."
-                className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
-              />
-            </div>
-          </div>
-
-          {errorMsg && (
-            <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl">
-              <ShieldAlert className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full mt-2 bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl shadow-[0_0_20px_rgba(99,102,241,0.35)] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-          >
-            <span>{isLoading ? 'Vérification...' : authMode === 'register' ? 'Créer mon compte' : 'Se connecter'}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </form>
-
-        <div className="border-t border-[#22293d] pt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Espace protégé AURA Master Planner</span>
         </div>
       </div>
     </div>
   );
 };
+
