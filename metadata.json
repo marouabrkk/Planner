@@ -1,0 +1,7 @@
+{
+  "name": "AURA Master Planner",
+  "description": "Système complet de productivité personnelle, suivi des cours, habitudes quotidiennes, calendrier hebdomadaire et mensuel avec gestion des accès clients.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
