@@ -55,6 +55,8 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             setIsSuccess(true);
             triggerCelebration();
             clearInterval(interval);
+            const current = loadApprovedEmails();
+            saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
             setTimeout(() => {
               onRefreshCheck();
             }, 600);

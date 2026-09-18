@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, KeyRound, ArrowLeft, Send, RefreshCw, Sparkles, ExternalLink, Copy, Check } from 'lucide-react';
-import { getAuthVault, saveAuthVaultPassword, isOwnerEmail } from '../utils/storage';
+import { getAuthVault, saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails, DEFAULT_APPROVED_EMAILS } from '../utils/storage';
 
 interface AuthModalProps {
-  onLogin: (email: string) => void;
+  onLogin: (email: string, isApprovedDirectly?: boolean) => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
@@ -113,8 +113,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         const data = await res.json().catch(() => ({}));
         if (data.success) {
           saveAuthVaultPassword(cleanEmail, password);
+          const currentApproved = loadApprovedEmails();
+          const isApproved =
+            isOwnerEmail(cleanEmail) ||
+            currentApproved.some(e => e.toLowerCase() === cleanEmail.toLowerCase()) ||
+            DEFAULT_APPROVED_EMAILS.some(e => e.toLowerCase() === cleanEmail.toLowerCase());
+          if (isApproved) {
+            saveApprovedEmails(Array.from(new Set([...currentApproved, cleanEmail.toLowerCase()])));
+          }
           setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
-          setTimeout(() => onLogin(cleanEmail), 1000);
+          setTimeout(() => onLogin(cleanEmail, isApproved), 1000);
           return;
         } else if (data.error) {
           setErrorMsg(data.error);
@@ -159,6 +167,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     const isOwner = isOwnerEmail(lowerEmail);
     const isMasterKey = password === 'ber7iche-aura-2026';
 
+    const currentApproved = loadApprovedEmails();
+    const isPreApproved =
+      isOwner ||
+      currentApproved.some(e => e.toLowerCase() === lowerEmail) ||
+      DEFAULT_APPROVED_EMAILS.some(e => e.toLowerCase() === lowerEmail);
+
     // 1. First attempt server verification
     try {
       const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
@@ -175,8 +189,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         const data = await res.json().catch(() => ({}));
         if (data.user || data.token || data.message || data.success) {
           saveAuthVaultPassword(lowerEmail, password);
-          onLogin(lowerEmail);
+          const approved =
+            data.user?.status === 'approved' ||
+            data.user?.role === 'admin' ||
+            isOwner ||
+            isPreApproved;
+          if (approved) {
+            saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+          }
+          onLogin(lowerEmail, approved);
           return;
+        }
+      }
+
+      // If user attempted login but account was not created yet on server,
+      // but admin approved this email (or it's an approved email):
+      // auto-register with the password they provided!
+      if (!res.ok && isJson && res.status === 404) {
+        try {
+          const regRes = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: lowerEmail, password })
+          });
+          if (regRes.ok) {
+            const regData = await regRes.json().catch(() => ({}));
+            saveAuthVaultPassword(lowerEmail, password);
+            const approved =
+              regData.user?.status === 'approved' ||
+              regData.user?.role === 'admin' ||
+              isOwner ||
+              isPreApproved;
+            if (approved) {
+              saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+            }
+            onLogin(lowerEmail, approved);
+            return;
+          }
+        } catch {
+          // ignore
         }
       }
 
@@ -198,40 +249,60 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       const vault = getAuthVault();
       const savedPass = vault[lowerEmail];
 
+      // Master key bypass for site administrator
+      if (isMasterKey) {
+        saveAuthVaultPassword(lowerEmail, password);
+        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+        onLogin(lowerEmail, true);
+        return;
+      }
+
+      // Verify owner accounts with their exact authorized passwords
+      if (
+        lowerEmail === 'ber7iche@gmail.com' ||
+        lowerEmail === 'maroua144@gmail.com' ||
+        lowerEmail === 'berkichemaroua@gmail.com'
+      ) {
+        const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
+        if (!isOwnerPassValid) {
+          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+          setIsLoading(false);
+          return;
+        }
+        saveAuthVaultPassword(lowerEmail, password);
+        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+        onLogin(lowerEmail, true);
+        return;
+      }
+
+      if (lowerEmail === 'marouaberkiche77@gmail.com') {
+        const isOwnerPassValid = password === 'maroua2026' || password === 'Nounoussa7' || (savedPass && password === savedPass);
+        if (!isOwnerPassValid) {
+          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+          setIsLoading(false);
+          return;
+        }
+        saveAuthVaultPassword(lowerEmail, password);
+        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+        onLogin(lowerEmail, true);
+        return;
+      }
+
+      // If client was pre-approved by admin in admin portal, allow setting/entering password and connecting immediately
+      if (isPreApproved) {
+        if (savedPass && savedPass !== password) {
+          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+          setIsLoading(false);
+          return;
+        }
+        saveAuthVaultPassword(lowerEmail, password);
+        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+        onLogin(lowerEmail, true);
+        return;
+      }
+
       if (authMode === 'login') {
-        // Master key bypass for site administrator
-        if (isMasterKey) {
-          saveAuthVaultPassword(lowerEmail, password);
-          onLogin(lowerEmail);
-          return;
-        }
-
-        // Verify owner accounts with their exact authorized passwords
-        if (lowerEmail === 'ber7iche@gmail.com' || lowerEmail === 'maroua144@gmail.com') {
-          const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
-          if (!isOwnerPassValid) {
-            setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
-            setIsLoading(false);
-            return;
-          }
-          saveAuthVaultPassword(lowerEmail, password);
-          onLogin(lowerEmail);
-          return;
-        }
-
-        if (lowerEmail === 'marouaberkiche77@gmail.com') {
-          const isOwnerPassValid = password === 'maroua2026' || password === 'Nounoussa7' || (savedPass && password === savedPass);
-          if (!isOwnerPassValid) {
-            setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
-            setIsLoading(false);
-            return;
-          }
-          saveAuthVaultPassword(lowerEmail, password);
-          onLogin(lowerEmail);
-          return;
-        }
-
-        // For all other client accounts:
+        // For unapproved client accounts:
         if (!savedPass) {
           setErrorMsg("Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer votre compte'.");
           setIsLoading(false);
@@ -245,7 +316,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         }
 
         saveAuthVaultPassword(lowerEmail, password);
-        onLogin(lowerEmail);
+        onLogin(lowerEmail, false);
       } else {
         // Register mode: check if already exists with another password
         if (savedPass && savedPass !== password && !isMasterKey) {
@@ -254,7 +325,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           return;
         }
         saveAuthVaultPassword(lowerEmail, password);
-        onLogin(lowerEmail);
+        onLogin(lowerEmail, false);
       }
     } catch {
       setErrorMsg('Erreur de connexion. Veuillez vérifier votre saisie.');

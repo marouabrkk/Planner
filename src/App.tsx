@@ -96,8 +96,23 @@ export default function App() {
   });
 
   // Sync approved list from backend
-  const refreshApprovalStatus = async () => {
+  const refreshApprovalStatus = async (checkEmail?: string) => {
+    const targetEmail = (checkEmail || currentUser?.email || '').trim().toLowerCase();
     try {
+      if (targetEmail) {
+        const statusRes = await fetch(`/api/auth/status?email=${encodeURIComponent(targetEmail)}`);
+        const statusContentType = statusRes.headers.get('content-type') || '';
+        if (statusRes.ok && statusContentType.includes('application/json')) {
+          const statusData = await statusRes.json().catch(() => ({}));
+          if (statusData.approved) {
+            const current = loadApprovedEmails();
+            const updated = Array.from(new Set([...current, targetEmail]));
+            setApprovedEmails(updated);
+            saveApprovedEmails(updated);
+          }
+        }
+      }
+
       const res = await fetch('/api/auth/approved-emails');
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
@@ -105,6 +120,7 @@ export default function App() {
         if (Array.isArray(data.emails)) {
           const approved = Array.from(new Set([
             ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase()),
+            ...loadApprovedEmails(),
             ...data.emails.map((e: string) => e.toLowerCase())
           ]));
           setApprovedEmails(approved);
@@ -188,29 +204,38 @@ export default function App() {
   };
 
   // Auth Handlers
-  const handleLogin = (email: string) => {
-    const isOwner = isOwnerEmail(email);
+  const handleLogin = (email: string, isApprovedDirectly = false) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const isOwner = isOwnerEmail(cleanEmail);
+    const locallyApproved = loadApprovedEmails();
+    const userIsApproved =
+      isApprovedDirectly ||
+      isOwner ||
+      approvedEmails.some((e) => e.toLowerCase() === cleanEmail) ||
+      locallyApproved.some((e) => e.toLowerCase() === cleanEmail) ||
+      DEFAULT_APPROVED_EMAILS.some((e) => e.toLowerCase() === cleanEmail);
+
+    if (userIsApproved) {
+      const updated = Array.from(new Set([
+        ...approvedEmails,
+        cleanEmail,
+        ...locallyApproved,
+        ...ADMIN_EMAILS.map((e) => e.toLowerCase()),
+        ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase())
+      ]));
+      setApprovedEmails(updated);
+      saveApprovedEmails(updated);
+    }
+
     const user: User = {
-      email,
-      id: 'u_' + btoa(email.toLowerCase()).replace(/=/g, ''),
+      email: cleanEmail,
+      id: 'u_' + btoa(cleanEmail).replace(/=/g, ''),
       role: isOwner ? 'admin' : 'client'
     };
 
     localStorage.setItem('aura_current_user', JSON.stringify(user));
     setCurrentUser(user);
-
-    // Only auto-approve if owner! Clients must be validated by admin after payment
-    if (isOwner) {
-      const updated = Array.from(new Set([
-        ...approvedEmails,
-        email.toLowerCase(),
-        ...ADMIN_EMAILS.map(e => e.toLowerCase()),
-        ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase())
-      ]));
-      setApprovedEmails(updated);
-      saveApprovedEmails(updated);
-    }
-    refreshApprovalStatus();
+    refreshApprovalStatus(cleanEmail);
   };
 
   const handleLogout = () => {
@@ -222,7 +247,9 @@ export default function App() {
   const isApproved =
     currentUser &&
     (isOwnerEmail(currentUser.email) ||
-      approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()));
+      approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()) ||
+      loadApprovedEmails().some((e) => e.toLowerCase() === currentUser.email.toLowerCase()) ||
+      DEFAULT_APPROVED_EMAILS.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()));
 
   // ================= Task Handlers =================
   const handleAddTask = (title: string, targetDate?: string) => {
