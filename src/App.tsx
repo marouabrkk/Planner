@@ -99,7 +99,7 @@ export default function App() {
   const refreshApprovalStatus = async (checkEmail?: string) => {
     const targetEmail = (checkEmail || currentUser?.email || '').trim().toLowerCase();
     try {
-      if (targetEmail) {
+      if (targetEmail && !isOwnerEmail(targetEmail)) {
         const statusRes = await fetch(`/api/auth/status?email=${encodeURIComponent(targetEmail)}`);
         const statusContentType = statusRes.headers.get('content-type') || '';
         if (statusRes.ok && statusContentType.includes('application/json')) {
@@ -109,6 +109,17 @@ export default function App() {
             const updated = Array.from(new Set([...current, targetEmail]));
             setApprovedEmails(updated);
             saveApprovedEmails(updated);
+          } else {
+            // Client was suspended or deleted by admin!
+            const current = loadApprovedEmails().filter((e) => e.toLowerCase() !== targetEmail);
+            setApprovedEmails(current);
+            saveApprovedEmails(current);
+
+            // If completely deleted, log them out immediately
+            if (statusData.status === 'not_found') {
+              localStorage.removeItem('aura_current_user');
+              setCurrentUser(null);
+            }
           }
         }
       }
@@ -118,13 +129,18 @@ export default function App() {
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (Array.isArray(data.emails)) {
+          const serverEmails = data.emails.map((e: string) => e.toLowerCase());
           const approved = Array.from(new Set([
-            ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase()),
-            ...loadApprovedEmails(),
-            ...data.emails.map((e: string) => e.toLowerCase())
+            ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase()),
+            ...serverEmails
           ]));
           setApprovedEmails(approved);
           saveApprovedEmails(approved);
+
+          if (currentUser && !isOwnerEmail(currentUser.email) && !approved.includes(currentUser.email.toLowerCase())) {
+            const cleaned = loadApprovedEmails().filter((e) => e.toLowerCase() !== currentUser.email.toLowerCase());
+            saveApprovedEmails(cleaned);
+          }
           return;
         }
       }
@@ -137,7 +153,25 @@ export default function App() {
 
   useEffect(() => {
     refreshApprovalStatus();
-  }, []);
+
+    // Check approval status periodically (every 4 seconds) if client is logged in
+    const interval = setInterval(() => {
+      if (currentUser && !isOwnerEmail(currentUser.email)) {
+        refreshApprovalStatus();
+      }
+    }, 4000);
+
+    const handleStorageChange = () => {
+      const current = loadApprovedEmails();
+      setApprovedEmails(current);
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [currentUser]);
 
   // Listen for direct URL activation tokens (#activate?token=AURA-2026&email=...)
   useEffect(() => {
@@ -212,8 +246,7 @@ export default function App() {
       isApprovedDirectly ||
       isOwner ||
       approvedEmails.some((e) => e.toLowerCase() === cleanEmail) ||
-      locallyApproved.some((e) => e.toLowerCase() === cleanEmail) ||
-      DEFAULT_APPROVED_EMAILS.some((e) => e.toLowerCase() === cleanEmail);
+      locallyApproved.some((e) => e.toLowerCase() === cleanEmail);
 
     if (userIsApproved) {
       const updated = Array.from(new Set([
@@ -247,9 +280,7 @@ export default function App() {
   const isApproved =
     currentUser &&
     (isOwnerEmail(currentUser.email) ||
-      approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()) ||
-      loadApprovedEmails().some((e) => e.toLowerCase() === currentUser.email.toLowerCase()) ||
-      DEFAULT_APPROVED_EMAILS.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()));
+      approvedEmails.some((e) => e.toLowerCase() === currentUser.email.toLowerCase()));
 
   // ================= Task Handlers =================
   const handleAddTask = (title: string, targetDate?: string) => {

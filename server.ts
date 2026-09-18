@@ -462,23 +462,19 @@ async function startServer() {
     }
 
     if (!user) {
-      // Auto-register pending client
-      user = {
-        id: 'u_' + Buffer.from(email).toString('base64').replace(/=/g, ''),
-        email: email,
-        status: 'pending',
+      return res.json({
+        email,
+        status: 'not_found',
         role: 'client',
-        createdAt: new Date().toISOString()
-      };
-      db.users.push(user);
-      writeDb(db);
+        approved: false
+      });
     }
 
     res.json({
       email: user.email,
       status: user.status,
       role: user.role,
-      approved: user.status === 'approved' || user.role === 'admin'
+      approved: (user.role === 'admin' && isOwnerEmail(user.email)) || user.status === 'approved'
     });
   });
 

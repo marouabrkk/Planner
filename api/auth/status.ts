@@ -38,6 +38,6 @@ export default async function handler(req: any, res: any) {
     email: user.email,
     status: user.status,
     role: user.role,
-    approved: user.status === 'approved' || user.role === 'admin'
+    approved: (user.role === 'admin' && isOwnerEmail(user.email)) || user.status === 'approved'
   });
 }

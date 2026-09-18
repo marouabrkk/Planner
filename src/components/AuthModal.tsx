@@ -170,8 +170,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     const currentApproved = loadApprovedEmails();
     const isPreApproved =
       isOwner ||
-      currentApproved.some(e => e.toLowerCase() === lowerEmail) ||
-      DEFAULT_APPROVED_EMAILS.some(e => e.toLowerCase() === lowerEmail);
+      currentApproved.some(e => e.toLowerCase() === lowerEmail);
 
     // 1. First attempt server verification
     try {
@@ -190,49 +189,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         if (data.user || data.token || data.message || data.success) {
           saveAuthVaultPassword(lowerEmail, password);
           const approved =
-            data.user?.status === 'approved' ||
-            data.user?.role === 'admin' ||
             isOwner ||
-            isPreApproved;
+            data.user?.status === 'approved' ||
+            (data.user?.role === 'admin' && isOwner);
+
           if (approved) {
             saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+          } else {
+            saveApprovedEmails(currentApproved.filter(e => e.toLowerCase() !== lowerEmail));
           }
           onLogin(lowerEmail, approved);
           return;
         }
       }
 
-      // If user attempted login but account was not created yet on server,
-      // but admin approved this email (or it's an approved email):
-      // auto-register with the password they provided!
-      if (!res.ok && isJson && res.status === 404) {
-        try {
-          const regRes = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: lowerEmail, password })
-          });
-          if (regRes.ok) {
-            const regData = await regRes.json().catch(() => ({}));
-            saveAuthVaultPassword(lowerEmail, password);
-            const approved =
-              regData.user?.status === 'approved' ||
-              regData.user?.role === 'admin' ||
-              isOwner ||
-              isPreApproved;
-            if (approved) {
-              saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-            }
-            onLogin(lowerEmail, approved);
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
       // If server returned a recognized JSON error (wrong password, account not found, etc.)
-      if (!res.ok && isJson && res.status !== 404 && res.status !== 405) {
+      if (!res.ok && isJson && res.status !== 405) {
         const data = await res.json().catch(() => ({}));
         if (data.error && !isMasterKey) {
           setErrorMsg(data.error);
@@ -260,8 +232,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       // Verify owner accounts with their exact authorized passwords
       if (
         lowerEmail === 'ber7iche@gmail.com' ||
-        lowerEmail === 'maroua144@gmail.com' ||
-        lowerEmail === 'berkichemaroua@gmail.com'
+        lowerEmail === 'maroua144@gmail.com'
       ) {
         const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
         if (!isOwnerPassValid) {
@@ -275,20 +246,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
-      if (lowerEmail === 'marouaberkiche77@gmail.com') {
-        const isOwnerPassValid = password === 'maroua2026' || password === 'Nounoussa7' || (savedPass && password === savedPass);
-        if (!isOwnerPassValid) {
-          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
-          setIsLoading(false);
-          return;
-        }
-        saveAuthVaultPassword(lowerEmail, password);
-        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-        onLogin(lowerEmail, true);
-        return;
-      }
-
-      // If client was pre-approved by admin in admin portal, allow setting/entering password and connecting immediately
+      // If client was approved by admin in admin portal:
       if (isPreApproved) {
         if (savedPass && savedPass !== password) {
           setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');

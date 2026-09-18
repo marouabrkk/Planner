@@ -342,6 +342,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
     // Remove from local storage
     const currentApproved = loadApprovedEmails();
     saveApprovedEmails(currentApproved.filter(e => e.toLowerCase() !== clean));
+    try {
+      window.dispatchEvent(new Event('storage'));
+    } catch {
+      // ignore
+    }
 
     try {
       const res = await fetch(`/api/admin/revoke?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
@@ -373,6 +378,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
       const vault = JSON.parse(raw);
       delete vault[clean];
       localStorage.setItem('aura_auth_vault', JSON.stringify(vault));
+    } catch {
+      // ignore
+    }
+    try {
+      window.dispatchEvent(new Event('storage'));
     } catch {
       // ignore
     }

@@ -37,9 +37,7 @@ const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(proces
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
 export const ADMIN_EMAILS = [
   'ber7iche@gmail.com',
-  'maroua144@gmail.com',
-  'marouaberkiche77@gmail.com',
-  'berkichemaroua@gmail.com'
+  'maroua144@gmail.com'
 ];
 
 export function isOwnerEmail(email: string): boolean {
