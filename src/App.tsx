@@ -115,11 +115,10 @@ export default function App() {
             setApprovedEmails(current);
             saveApprovedEmails(current);
 
-            // If completely deleted, log them out immediately
-            if (statusData.status === 'not_found') {
-              localStorage.removeItem('aura_current_user');
-              setCurrentUser(null);
-            }
+            // Immediate forced logout
+            localStorage.removeItem('aura_current_user');
+            setCurrentUser(null);
+            return;
           }
         }
       }
@@ -140,6 +139,8 @@ export default function App() {
           if (currentUser && !isOwnerEmail(currentUser.email) && !approved.includes(currentUser.email.toLowerCase())) {
             const cleaned = loadApprovedEmails().filter((e) => e.toLowerCase() !== currentUser.email.toLowerCase());
             saveApprovedEmails(cleaned);
+            localStorage.removeItem('aura_current_user');
+            setCurrentUser(null);
           }
           return;
         }
@@ -164,6 +165,10 @@ export default function App() {
     const handleStorageChange = () => {
       const current = loadApprovedEmails();
       setApprovedEmails(current);
+      if (currentUser && !isOwnerEmail(currentUser.email) && !current.some((e) => e.toLowerCase() === currentUser.email.toLowerCase())) {
+        localStorage.removeItem('aura_current_user');
+        setCurrentUser(null);
+      }
     };
     window.addEventListener('storage', handleStorageChange);
 
@@ -172,54 +177,6 @@ export default function App() {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [currentUser]);
-
-  // Listen for direct URL activation tokens (#activate?token=AURA-2026&email=...)
-  useEffect(() => {
-    try {
-      const href = window.location.href;
-      const isActivation =
-        href.includes('activate') ||
-        href.includes('token=AURA-2026') ||
-        href.includes('token=VALID-2026') ||
-        href.includes('token=ber7iche-aura-2026') ||
-        href.includes('token=') ||
-        href.includes('approve');
-
-      if (isActivation) {
-        let targetEmail = '';
-        const emailMatch = href.match(/[?&#]email=([^&#]+)/i);
-        if (emailMatch && emailMatch[1]) {
-          targetEmail = decodeURIComponent(emailMatch[1]).trim().toLowerCase();
-        } else {
-          try {
-            const urlObj = new URL(href.replace('#', '?'));
-            targetEmail = (urlObj.searchParams.get('email') || '').trim().toLowerCase();
-          } catch {
-            // ignore
-          }
-        }
-
-        const emailToApprove = targetEmail || currentUser?.email?.toLowerCase();
-        if (emailToApprove) {
-          const current = loadApprovedEmails();
-          const updated = Array.from(new Set([...current, emailToApprove]));
-          saveApprovedEmails(updated);
-          setApprovedEmails(updated);
-          triggerCelebration();
-
-          if (!currentUser && targetEmail) {
-            handleLogin(targetEmail);
-          }
-        }
-
-        if (!href.includes('validation') && !href.includes('admin')) {
-          window.history.replaceState(null, '', window.location.pathname);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, [currentUser?.email]);
 
   // When current user changes, reload their partitioned data
   useEffect(() => {
@@ -241,24 +198,27 @@ export default function App() {
   const handleLogin = (email: string, isApprovedDirectly = false) => {
     const cleanEmail = email.trim().toLowerCase();
     const isOwner = isOwnerEmail(cleanEmail);
-    const locallyApproved = loadApprovedEmails();
+
     const userIsApproved =
       isApprovedDirectly ||
       isOwner ||
-      approvedEmails.some((e) => e.toLowerCase() === cleanEmail) ||
-      locallyApproved.some((e) => e.toLowerCase() === cleanEmail);
+      approvedEmails.some((e) => e.toLowerCase() === cleanEmail);
 
-    if (userIsApproved) {
-      const updated = Array.from(new Set([
-        ...approvedEmails,
-        cleanEmail,
-        ...locallyApproved,
-        ...ADMIN_EMAILS.map((e) => e.toLowerCase()),
-        ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase())
-      ]));
-      setApprovedEmails(updated);
-      saveApprovedEmails(updated);
+    // Strictly forbid logging into the private space if not approved
+    if (!userIsApproved) {
+      localStorage.removeItem('aura_current_user');
+      setCurrentUser(null);
+      return;
     }
+
+    const updated = Array.from(new Set([
+      ...approvedEmails,
+      cleanEmail,
+      ...ADMIN_EMAILS.map((e) => e.toLowerCase()),
+      ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase())
+    ]));
+    setApprovedEmails(updated);
+    saveApprovedEmails(updated);
 
     const user: User = {
       email: cleanEmail,
@@ -519,24 +479,32 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#0a0c13] text-[#f8fafc] p-4 sm:p-6 flex flex-col gap-4 max-w-[1600px] mx-auto">
-      {/* 1. Auth Overlay if not logged in */}
-      {!currentUser && (
+  // 1. Auth screen if not logged in - strictly do not render private dashboard into DOM
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-[#0a0c13] text-[#f8fafc] flex items-center justify-center p-4">
         <AuthModal onLogin={handleLogin} />
-      )}
+      </div>
+    );
+  }
 
-      {/* 2. Pending Approval Overlay if logged in but not approved */}
-      {currentUser && !isApproved && !isOwnerEmail(currentUser.email) && (
+  // 2. Pending Approval screen if logged in but unapproved - strictly do not render private dashboard into DOM
+  if (!isApproved && !isOwnerEmail(currentUser.email)) {
+    return (
+      <div className="min-h-screen bg-[#0a0c13] text-[#f8fafc] flex items-center justify-center p-4">
         <PendingApprovalModal
           userEmail={currentUser.email}
           paymentSettings={paymentSettings}
           onRefreshCheck={refreshApprovalStatus}
           onLogout={handleLogout}
         />
-      )}
+      </div>
+    );
+  }
 
-      {/* 3. Main Dashboard (shown when authenticated and approved) */}
+  // 3. Main Dashboard (rendered ONLY when authenticated AND verified approved)
+  return (
+    <div className="min-h-screen bg-[#0a0c13] text-[#f8fafc] p-4 sm:p-6 flex flex-col gap-4 max-w-[1600px] mx-auto">
       <Header
         currentUser={currentUser}
         selectedMonth={selectedMonth}

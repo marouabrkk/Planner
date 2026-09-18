@@ -172,7 +172,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       isOwner ||
       currentApproved.some(e => e.toLowerCase() === lowerEmail);
 
-    // 1. First attempt server verification
+    // 1. Server-Authoritative verification
     try {
       const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const res = await fetch(endpoint, {
@@ -186,25 +186,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
 
       if (res.ok && isJson) {
         const data = await res.json().catch(() => ({}));
-        if (data.user || data.token || data.message || data.success) {
-          saveAuthVaultPassword(lowerEmail, password);
-          const approved =
-            isOwner ||
-            data.user?.status === 'approved' ||
-            (data.user?.role === 'admin' && isOwner);
+        const approved = isOwner || data.approved === true || data.user?.status === 'approved';
 
-          if (approved) {
-            saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-          } else {
-            saveApprovedEmails(currentApproved.filter(e => e.toLowerCase() !== lowerEmail));
-          }
-          onLogin(lowerEmail, approved);
+        if (approved) {
+          saveAuthVaultPassword(lowerEmail, password);
+          saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
+          onLogin(lowerEmail, true);
+          return;
+        }
+
+        // If not approved: NEVER log in
+        if (authMode === 'register') {
+          saveAuthVaultPassword(lowerEmail, password);
+          setSuccessMsg(
+            data.message ||
+            "✅ Votre demande d'accès a été transmise à l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter avec ce mot de passe."
+          );
+          setPassword('');
+          setIsLoading(false);
+          return;
+        } else {
+          setErrorMsg(
+            data.message ||
+            "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
+          );
+          setIsLoading(false);
           return;
         }
       }
 
-      // If server returned a recognized JSON error (wrong password, account not found, etc.)
-      if (!res.ok && isJson && res.status !== 405) {
+      // If server returned a recognized JSON error (not authorized, wrong password, etc.)
+      if (!res.ok && isJson) {
         const data = await res.json().catch(() => ({}));
         if (data.error && !isMasterKey) {
           setErrorMsg(data.error);
@@ -213,10 +225,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         }
       }
     } catch {
-      // Server unreachable (Vercel static / offline)
+      // Server unreachable (static fallback / offline mode)
     }
 
-    // 2. Strict Vault / Local fallback verification
+    // 2. Strict Vault / Local fallback verification (ONLY for owners or already approved clients)
     try {
       const vault = getAuthVault();
       const savedPass = vault[lowerEmail];
@@ -229,11 +241,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
-      // Verify owner accounts with their exact authorized passwords
-      if (
-        lowerEmail === 'ber7iche@gmail.com' ||
-        lowerEmail === 'maroua144@gmail.com'
-      ) {
+      // Verify owner accounts with their authorized passwords
+      if (isOwner) {
         const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
         if (!isOwnerPassValid) {
           setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
@@ -246,7 +255,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
-      // If client was approved by admin in admin portal:
+      // For clients: ONLY allowed if they have already been approved by admin!
       if (isPreApproved) {
         if (savedPass && savedPass !== password) {
           setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
@@ -259,31 +268,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
+      // If client is NOT approved: Strictly forbid connection!
       if (authMode === 'login') {
-        // For unapproved client accounts:
-        if (!savedPass) {
-          setErrorMsg("Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer votre compte'.");
-          setIsLoading(false);
-          return;
-        }
-
-        if (savedPass !== password) {
-          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
-          setIsLoading(false);
-          return;
-        }
-
-        saveAuthVaultPassword(lowerEmail, password);
-        onLogin(lowerEmail, false);
+        setErrorMsg("Cette adresse Gmail n'est pas autorisée ou n'a pas encore été approuvée par l'administrateur.");
+        setIsLoading(false);
+        return;
       } else {
-        // Register mode: check if already exists with another password
-        if (savedPass && savedPass !== password && !isMasterKey) {
-          setErrorMsg('Un compte existe déjà avec cette adresse email. Veuillez vous connecter avec votre mot de passe.');
-          setIsLoading(false);
-          return;
-        }
         saveAuthVaultPassword(lowerEmail, password);
-        onLogin(lowerEmail, false);
+        setSuccessMsg("✅ Demande enregistrée ! L'administrateur doit d'abord approuver votre adresse Gmail dans l'espace privé avant que vous puissiez vous connecter.");
+        setPassword('');
+        setIsLoading(false);
+        return;
       }
     } catch {
       setErrorMsg('Erreur de connexion. Veuillez vérifier votre saisie.');

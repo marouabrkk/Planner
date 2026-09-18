@@ -215,9 +215,11 @@ async function startServer() {
 
     const cleanEmail = email.trim().toLowerCase();
     const db = readDb();
+    const isOwner = isOwnerEmail(cleanEmail);
     const existing = db.users.find(u => u.email.toLowerCase() === cleanEmail);
 
     if (existing) {
+      const isApproved = isOwner || existing.status === 'approved';
       if (existing.password && existing.password !== password) {
         return res.status(400).json({
           error: 'Ce compte existe déjà avec un mot de passe différent. Veuillez vous connecter avec le bon mot de passe.'
@@ -225,20 +227,29 @@ async function startServer() {
       }
       if (!existing.password) {
         existing.password = password;
-        writeDb(db);
       }
+      if (isOwner) {
+        existing.status = 'approved';
+        existing.role = 'admin';
+      }
+      writeDb(db);
+
       return res.json({
+        success: true,
+        approved: isApproved,
         user: {
           id: existing.id,
           email: existing.email,
           role: existing.role,
           status: existing.status,
           createdAt: existing.createdAt
-        }
+        },
+        message: isApproved
+          ? 'Compte validé ! Vous pouvez vous connecter.'
+          : "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter."
       });
     }
 
-    const isOwner = isOwnerEmail(cleanEmail);
     const newUser = {
       id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
       email: cleanEmail,
@@ -260,6 +271,8 @@ async function startServer() {
     }
 
     res.json({
+      success: true,
+      approved: isOwner,
       user: {
         id: newUser.id,
         email: newUser.email,
@@ -267,11 +280,13 @@ async function startServer() {
         status: newUser.status,
         createdAt: newUser.createdAt
       },
-      message: isOwner ? 'Compte administrateur validé' : 'Compte créé ! Demande de validation transmise.'
+      message: isOwner
+        ? 'Compte administrateur validé !'
+        : "Votre demande a été transmise avec succès à l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter avec ce mot de passe."
     });
   });
 
-  // Auth: Login (Verifies password strictly)
+  // Auth: Login (Verifies existence, approval, and password strictly)
   app.post('/api/auth/login', (req, res) => {
     const { email, password } = req.body || {};
     if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -286,27 +301,47 @@ async function startServer() {
     let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
     const isOwner = isOwnerEmail(cleanEmail);
 
-    // If user does not exist in login mode
+    // If account doesn't exist in database
     if (!user) {
-      return res.status(404).json({
-        error: "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'."
+      if (isOwner) {
+        // Auto-provision owner admin account
+        user = {
+          id: 'admin_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+          email: cleanEmail,
+          password: password,
+          status: 'approved',
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          approvedAt: new Date().toISOString()
+        };
+        db.users.push(user);
+        writeDb(db);
+      } else {
+        return res.status(403).json({
+          error: "Cette adresse Gmail n'est pas autorisée. Veuillez demander à l'administrateur d'ajouter ou d'approuver votre adresse Gmail dans l'espace privé."
+        });
+      }
+    }
+
+    // Check approval status
+    const isApproved = isOwner || user.status === 'approved';
+    if (!isApproved) {
+      return res.status(403).json({
+        error: "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
       });
     }
 
-    // STRICT PASSWORD VERIFICATION:
-    if (user.password && user.password !== password) {
-      return res.status(401).json({
-        error: 'Mot de passe incorrect. Veuillez vérifier votre mot de passe.'
-      });
-    }
-
-    // If user account was created without password, set it now
+    // If user was pre-approved by admin without password, assign this password
     if (!user.password) {
       user.password = password;
       writeDb(db);
+    } else if (user.password !== password) {
+      return res.status(401).json({
+        error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
+      });
     }
 
-    // Ensure owner role/status is always approved
+    // Ensure owner has admin role
     if (isOwner) {
       user.role = 'admin';
       user.status = 'approved';
@@ -314,6 +349,8 @@ async function startServer() {
     }
 
     res.json({
+      success: true,
+      approved: true,
       user: {
         id: user.id,
         email: user.email,

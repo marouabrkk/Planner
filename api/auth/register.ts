@@ -20,7 +20,10 @@ export default async function handler(req: any, res: any) {
   const db = readDb();
   const existing = db.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
 
+  const isOwner = isOwnerEmail(cleanEmail);
+
   if (existing) {
+    const isApproved = isOwner || existing.status === 'approved';
     if (existing.password && existing.password !== password) {
       return res.status(400).json({
         error: 'Ce compte existe déjà avec un mot de passe différent. Veuillez vous connecter avec le bon mot de passe.'
@@ -28,20 +31,29 @@ export default async function handler(req: any, res: any) {
     }
     if (!existing.password) {
       existing.password = password;
-      writeDb(db);
     }
+    if (isOwner) {
+      existing.status = 'approved';
+      existing.role = 'admin';
+    }
+    writeDb(db);
+
     return res.json({
+      success: true,
+      approved: isApproved,
       user: {
         id: existing.id,
         email: existing.email,
         role: existing.role,
         status: existing.status,
         createdAt: existing.createdAt
-      }
+      },
+      message: isApproved
+        ? 'Compte validé ! Vous pouvez vous connecter.'
+        : "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter."
     });
   }
 
-  const isOwner = isOwnerEmail(cleanEmail);
   const newUser = {
     id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
     email: cleanEmail,
@@ -56,6 +68,8 @@ export default async function handler(req: any, res: any) {
   writeDb(db);
 
   return res.json({
+    success: true,
+    approved: isOwner,
     user: {
       id: newUser.id,
       email: newUser.email,
@@ -63,6 +77,8 @@ export default async function handler(req: any, res: any) {
       status: newUser.status,
       createdAt: newUser.createdAt
     },
-    message: isOwner ? 'Compte administrateur validé' : 'Compte créé ! Demande de validation transmise.'
+    message: isOwner
+      ? 'Compte administrateur validé !'
+      : "Votre demande a été transmise avec succès à l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter avec ce mot de passe."
   });
 }

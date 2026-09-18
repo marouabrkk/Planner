@@ -21,21 +21,43 @@ export default async function handler(req: any, res: any) {
   let user = db.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
   const isOwner = isOwnerEmail(cleanEmail);
 
+  // If account doesn't exist in database
   if (!user) {
-    return res.status(404).json({
-      error: "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'."
+    if (isOwner) {
+      user = {
+        id: 'admin_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+        email: cleanEmail,
+        password: password,
+        status: 'approved',
+        role: 'admin',
+        createdAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString()
+      };
+      db.users.push(user);
+      writeDb(db);
+    } else {
+      return res.status(403).json({
+        error: "Cette adresse Gmail n'est pas autorisée. Veuillez demander à l'administrateur d'ajouter ou d'approuver votre adresse Gmail dans l'espace privé."
+      });
+    }
+  }
+
+  // Check approval status
+  const isApproved = isOwner || user.status === 'approved';
+  if (!isApproved) {
+    return res.status(403).json({
+      error: "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
     });
   }
 
-  if (user.password && user.password !== password) {
-    return res.status(401).json({
-      error: 'Mot de passe incorrect. Veuillez vérifier votre mot de passe.'
-    });
-  }
-
+  // If user account was created without password, set it now
   if (!user.password) {
     user.password = password;
     writeDb(db);
+  } else if (user.password !== password) {
+    return res.status(401).json({
+      error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
+    });
   }
 
   if (isOwner) {
@@ -45,6 +67,8 @@ export default async function handler(req: any, res: any) {
   }
 
   return res.json({
+    success: true,
+    approved: true,
     user: {
       id: user.id,
       email: user.email,
