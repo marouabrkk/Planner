@@ -22,7 +22,7 @@ import { WeekView } from './components/WeekView';
 import { MonthView } from './components/MonthView';
 import { AuthModal } from './components/AuthModal';
 import { PendingApprovalModal } from './components/PendingApprovalModal';
-import { AdminPortal } from './components/AdminPortal';
+import { AdminPortal, ADMIN_SECRET_KEY } from './components/AdminPortal';
 import { AddEventModal } from './components/AddEventModal';
 
 export default function App() {
@@ -95,6 +95,58 @@ export default function App() {
     return getInitialUserData();
   });
 
+  // Direct activation link listener (?token=AURA-2026&email=...)
+  useEffect(() => {
+    const handleDirectActivation = async () => {
+      try {
+        const fullUrl = window.location.href;
+        const hash = window.location.hash || '';
+        if (hash.includes('activate') || hash.includes('token=')) {
+          const matchToken = fullUrl.match(/[?&#]token=([^&#]+)/);
+          const matchEmail = fullUrl.match(/[?&#]email=([^&#]+)/);
+          const token = matchToken ? decodeURIComponent(matchToken[1]).trim() : '';
+          const emailParam = matchEmail ? decodeURIComponent(matchEmail[1]).trim().toLowerCase() : '';
+
+          if (emailParam && (token === 'AURA-2026' || token === ADMIN_SECRET_KEY)) {
+            // 1. Ensure approved locally
+            const current = loadApprovedEmails();
+            const updated = Array.from(new Set([...current, emailParam]));
+            saveApprovedEmails(updated);
+            setApprovedEmails(updated);
+
+            // 2. Set as logged-in approved user
+            const user: User = {
+              email: emailParam,
+              id: 'u_' + btoa(emailParam).replace(/=/g, ''),
+              role: isOwnerEmail(emailParam) ? 'admin' : 'client'
+            };
+            localStorage.setItem('aura_current_user', JSON.stringify(user));
+            setCurrentUser(user);
+
+            // 3. Confirm with server
+            fetch(`/api/admin/approve?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_SECRET_KEY },
+              body: JSON.stringify({ email: emailParam, adminKey: ADMIN_SECRET_KEY })
+            }).catch(() => {});
+
+            // 4. Trigger celebration
+            triggerCelebration();
+
+            // 5. Clean URL hash
+            window.location.hash = '';
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse activation link:', err);
+      }
+    };
+
+    handleDirectActivation();
+    window.addEventListener('hashchange', handleDirectActivation);
+    return () => window.removeEventListener('hashchange', handleDirectActivation);
+  }, []);
+
   // Sync approved list from backend
   const refreshApprovalStatus = async (checkEmail?: string) => {
     const targetEmail = (checkEmail || currentUser?.email || '').trim().toLowerCase();
@@ -109,17 +161,18 @@ export default function App() {
             const updated = Array.from(new Set([...current, targetEmail]));
             setApprovedEmails(updated);
             saveApprovedEmails(updated);
-          } else {
-            // Client was suspended or deleted by admin!
+          } else if (statusData.status === 'revoked' || statusData.status === 'deleted') {
+            // Client was explicitly revoked or deleted by admin!
             const current = loadApprovedEmails().filter((e) => e.toLowerCase() !== targetEmail);
             setApprovedEmails(current);
             saveApprovedEmails(current);
 
-            // Immediate forced logout
+            // Immediate forced logout ONLY when revoked or deleted
             localStorage.removeItem('aura_current_user');
             setCurrentUser(null);
             return;
           }
+          // Note: If status is 'pending', DO NOT logout! The user is viewing PendingApprovalModal (BaridiMob)
         }
       }
 
@@ -129,19 +182,14 @@ export default function App() {
         const data = await res.json();
         if (Array.isArray(data.emails)) {
           const serverEmails = data.emails.map((e: string) => e.toLowerCase());
+          const currentLocal = loadApprovedEmails();
           const approved = Array.from(new Set([
             ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase()),
+            ...currentLocal.map((e) => e.toLowerCase()),
             ...serverEmails
           ]));
           setApprovedEmails(approved);
           saveApprovedEmails(approved);
-
-          if (currentUser && !isOwnerEmail(currentUser.email) && !approved.includes(currentUser.email.toLowerCase())) {
-            const cleaned = loadApprovedEmails().filter((e) => e.toLowerCase() !== currentUser.email.toLowerCase());
-            saveApprovedEmails(cleaned);
-            localStorage.removeItem('aura_current_user');
-            setCurrentUser(null);
-          }
           return;
         }
       }
@@ -157,18 +205,20 @@ export default function App() {
 
     // Check approval status periodically (every 4 seconds) if client is logged in
     const interval = setInterval(() => {
-      if (currentUser && !isOwnerEmail(currentUser.email)) {
-        refreshApprovalStatus();
+      const stored = localStorage.getItem('aura_current_user');
+      if (stored) {
+        try {
+          const u = JSON.parse(stored);
+          if (u?.email && !isOwnerEmail(u.email)) {
+            refreshApprovalStatus(u.email);
+          }
+        } catch {}
       }
     }, 4000);
 
     const handleStorageChange = () => {
       const current = loadApprovedEmails();
       setApprovedEmails(current);
-      if (currentUser && !isOwnerEmail(currentUser.email) && !current.some((e) => e.toLowerCase() === currentUser.email.toLowerCase())) {
-        localStorage.removeItem('aura_current_user');
-        setCurrentUser(null);
-      }
     };
     window.addEventListener('storage', handleStorageChange);
 
@@ -176,7 +226,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [currentUser]);
+  }, []);
 
   // When current user changes, reload their partitioned data
   useEffect(() => {
@@ -204,22 +254,6 @@ export default function App() {
       isOwner ||
       approvedEmails.some((e) => e.toLowerCase() === cleanEmail);
 
-    // Strictly forbid logging into the private space if not approved
-    if (!userIsApproved) {
-      localStorage.removeItem('aura_current_user');
-      setCurrentUser(null);
-      return;
-    }
-
-    const updated = Array.from(new Set([
-      ...approvedEmails,
-      cleanEmail,
-      ...ADMIN_EMAILS.map((e) => e.toLowerCase()),
-      ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase())
-    ]));
-    setApprovedEmails(updated);
-    saveApprovedEmails(updated);
-
     const user: User = {
       email: cleanEmail,
       id: 'u_' + btoa(cleanEmail).replace(/=/g, ''),
@@ -228,6 +262,18 @@ export default function App() {
 
     localStorage.setItem('aura_current_user', JSON.stringify(user));
     setCurrentUser(user);
+
+    if (userIsApproved) {
+      const updated = Array.from(new Set([
+        ...approvedEmails,
+        cleanEmail,
+        ...ADMIN_EMAILS.map((e) => e.toLowerCase()),
+        ...DEFAULT_APPROVED_EMAILS.map((e) => e.toLowerCase())
+      ]));
+      setApprovedEmails(updated);
+      saveApprovedEmails(updated);
+    }
+
     refreshApprovalStatus(cleanEmail);
   };
 
