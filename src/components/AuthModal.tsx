@@ -12,7 +12,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetCode, setResetCode] = useState('');
-  const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string>('');
   const [isEmailDelivered, setIsEmailDelivered] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
@@ -27,7 +27,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
   }, [resendCooldown]);
 
-  // Request 6-digit code by email
+  // Request 6-digit code strictly sent by email to Gmail
   const handleRequestCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg('');
@@ -40,9 +40,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     setIsLoading(true);
-    let serverDelivered = false;
-    let serverCode: string | null = null;
-    let serverHandled = false;
 
     try {
       const res = await fetch('/api/auth/send-reset-code', {
@@ -52,59 +49,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       });
 
       const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        const data = await res.json().catch(() => ({}));
-        if (data.success) {
-          serverHandled = true;
-          serverDelivered = Boolean(data.delivered);
-          serverCode = data.code || data.previewCode || null;
+      const isJson = contentType.includes('application/json');
+      const data = isJson ? await res.json().catch(() => ({})) : {};
 
-          if (data.code) {
-            try {
-              const raw = localStorage.getItem('aura_reset_codes') || '{}';
-              const store = JSON.parse(raw);
-              store[cleanEmail.toLowerCase()] = data.code;
-              localStorage.setItem('aura_reset_codes', JSON.stringify(store));
-            } catch {
-              // ignore
-            }
-          }
+      if (res.ok && data.success) {
+        setForgotStep('verify');
+        setResendCooldown(45);
+        setIsEmailDelivered(true);
+        if (data.resetToken) {
+          setResetToken(data.resetToken);
         }
+        setSuccessMsg(`Code de sécurité envoyé à ${cleanEmail} ! Consultez votre boîte de réception Gmail (et vérifiez vos spams).`);
+        setIsLoading(false);
+        return;
+      } else if (data.error) {
+        setErrorMsg(data.error);
+        setIsLoading(false);
+        return;
       }
     } catch {
-      // Backend not available (Vercel static / offline)
+      // Backend error
     }
 
-    if (serverHandled && serverDelivered) {
-      setForgotStep('verify');
-      setResendCooldown(30);
-      setIsEmailDelivered(true);
-      setPreviewCode(null);
-      setSuccessMsg(`Code secret envoyé à ${cleanEmail} ! Ouvrez votre boîte Gmail (et vérifiez vos spams).`);
-      setIsLoading(false);
-      return;
-    }
-
-    // Static / Offline fallback: generate code directly so user is never blocked on Vercel
-    const demoCode = serverCode || Math.floor(100000 + Math.random() * 900000).toString();
-    try {
-      const raw = localStorage.getItem('aura_reset_codes') || '{}';
-      const store = JSON.parse(raw);
-      store[cleanEmail.toLowerCase()] = demoCode;
-      localStorage.setItem('aura_reset_codes', JSON.stringify(store));
-    } catch {
-      // ignore
-    }
-
-    setForgotStep('verify');
-    setResendCooldown(30);
-    setIsEmailDelivered(false);
-    setPreviewCode(demoCode);
-    setSuccessMsg(`Code de sécurité généré pour ${cleanEmail} !`);
+    setErrorMsg("Impossible d'envoyer l'email pour le moment. Veuillez vérifier votre connexion ou votre adresse Gmail.");
     setIsLoading(false);
   };
 
-  // Verify 6-digit code and save new password
+  // Verify 6-digit code received in Gmail and save new password
   const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -114,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     const cleanCode = resetCode.trim().replace(/\s+/g, '');
 
     if (!cleanCode || cleanCode.length !== 6) {
-      setErrorMsg('Veuillez entrer le code de sécurité à 6 chiffres.');
+      setErrorMsg('Veuillez entrer le code de sécurité à 6 chiffres reçu dans votre boîte Gmail.');
       return;
     }
 
@@ -124,7 +95,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     setIsLoading(true);
-    let serverUpdated = false;
 
     try {
       const res = await fetch('/api/auth/verify-reset-code', {
@@ -133,7 +103,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         body: JSON.stringify({
           email: cleanEmail,
           code: cleanCode,
-          newPassword: password
+          newPassword: password,
+          resetToken
         })
       });
 
@@ -141,35 +112,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json().catch(() => ({}));
         if (data.success) {
-          serverUpdated = true;
+          saveAuthVaultPassword(cleanEmail, password);
+          setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
+          setTimeout(() => onLogin(cleanEmail), 1000);
+          return;
+        } else if (data.error) {
+          setErrorMsg(data.error);
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        if (data.error) {
+          setErrorMsg(data.error);
+          setIsLoading(false);
+          return;
         }
       }
     } catch {
-      // server unreachable
+      // Server error
     }
 
-    // Check local store if server didn't handle it
-    let localValid = false;
-    try {
-      const raw = localStorage.getItem('aura_reset_codes') || '{}';
-      const store = JSON.parse(raw);
-      if (store[cleanEmail.toLowerCase()] === cleanCode) {
-        localValid = true;
-        delete store[cleanEmail.toLowerCase()];
-        localStorage.setItem('aura_reset_codes', JSON.stringify(store));
-      }
-    } catch {
-      // ignore
-    }
-
-    if (serverUpdated || localValid) {
-      saveAuthVaultPassword(cleanEmail, password);
-      setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
-      setTimeout(() => onLogin(cleanEmail), 1000);
-      return;
-    }
-
-    setErrorMsg('Code de vérification incorrect ou expiré. Veuillez vérifier les 6 chiffres.');
+    setErrorMsg('Code de vérification incorrect ou expiré. Veuillez vérifier le code reçu dans Gmail.');
     setIsLoading(false);
   };
 
@@ -372,7 +336,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               setForgotStep('request');
               setErrorMsg('');
               setSuccessMsg('');
-              setPreviewCode(null);
+              setResetToken('');
             }}
             className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold self-start cursor-pointer transition-colors"
           >
@@ -462,33 +426,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               <ExternalLink className="w-3.5 h-3.5 ml-auto text-cyan-400 shrink-0" />
             </a>
 
-            {/* Preview code helper (visible when external SMTP is not yet configured) */}
-            {previewCode && (
-              <div className="bg-amber-950/30 border border-amber-500/30 p-3 rounded-xl flex flex-col gap-2 text-xs text-amber-200">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 font-bold text-amber-300">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Code direct (secours immédiat) :</span>
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono font-black tracking-wider text-amber-300 bg-black/60 px-2 py-0.5 rounded border border-amber-500/40 text-sm">
-                      {previewCode}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setResetCode(previewCode)}
-                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-2.5 py-0.5 rounded text-[11px] cursor-pointer transition-colors shadow-sm"
-                      title="Insérer automatiquement ce code"
-                    >
-                      Insérer
-                    </button>
-                  </div>
-                </div>
-                <p className="text-[10.5px] text-slate-400 leading-relaxed border-t border-amber-500/20 pt-1.5">
-                  ℹ️ L'envoi automatique par Gmail nécessite la configuration de votre mot de passe d'application Google dans l'espace admin. Ce code s'affiche donc ici pour vous débloquer immédiatement sans attendre !
-                </p>
-              </div>
-            )}
+            {/* Info notice explaining email dispatch */}
+            <div className="bg-indigo-950/30 border border-indigo-500/20 p-3 rounded-xl flex items-start gap-2.5 text-xs text-indigo-200">
+              <Mail className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-slate-300 leading-relaxed m-0">
+                Le code de sécurité a été envoyé directement à votre adresse Gmail. Ouvrez l'application Gmail ou cliquez sur le bouton ci-dessus pour le récupérer (pensez à vérifier vos <strong>Spams</strong>).
+              </p>
+            </div>
 
             {/* 6-Digit Code Input */}
             <div className="flex flex-col gap-1.5">

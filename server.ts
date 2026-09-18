@@ -235,15 +235,19 @@ async function startServer() {
     // Try sending email via nodemailer
     const emailResult = await sendVerificationCodeEmail(cleanEmail, code);
 
-    res.json({
-      success: true,
-      delivered: emailResult.delivered,
-      code,
-      previewCode: emailResult.delivered ? undefined : code,
-      message: emailResult.delivered
-        ? `Code secret envoyé à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`
-        : `Code de sécurité généré pour ${cleanEmail} !`
-    });
+    if (emailResult.delivered) {
+      res.json({
+        success: true,
+        delivered: true,
+        message: `Code secret envoyé à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        delivered: false,
+        error: `Impossible d'envoyer l'email vers ${cleanEmail}. Veuillez vérifier votre adresse.`
+      });
+    }
   });
 
   // Auth: Verify 6-digit Reset Code and update password

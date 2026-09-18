@@ -1,4 +1,7 @@
 import nodemailer from 'nodemailer';
+import crypto from 'crypto';
+
+const RESET_SECRET = process.env.RESET_SECRET || 'aura-reset-secure-salt-2026-ber7iche';
 
 export default async function handler(req: any, res: any) {
   // CORS
@@ -25,6 +28,14 @@ export default async function handler(req: any, res: any) {
   const user = process.env.SMTP_USER || 'ber7iche@gmail.com';
   const pass = (process.env.SMTP_PASS || 'xbkwqnjystzdibnc').replace(/\s+/g, '');
   const fromName = 'AURA Master Planner';
+
+  // Generate signed verification token without exposing code to client
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+  const signature = crypto
+    .createHmac('sha256', RESET_SECRET)
+    .update(`${cleanEmail}:${code}:${expiresAt}`)
+    .digest('hex');
+  const resetToken = `${expiresAt}:${signature}`;
 
   try {
     const transporter = nodemailer.createTransport({
@@ -58,22 +69,18 @@ export default async function handler(req: any, res: any) {
       `
     });
 
-    console.log(`[AURA EMAIL VERCEL] Code ${code} envoyé avec succès à ${cleanEmail}`);
+    console.log(`[AURA EMAIL GMAIL] Code envoyé avec succès à ${cleanEmail}`);
     return res.status(200).json({
       success: true,
       delivered: true,
-      code,
-      message: `Code secret envoyé avec succès à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`
+      resetToken,
+      message: `Code de sécurité envoyé à votre adresse Gmail (${cleanEmail}) !`
     });
   } catch (err: any) {
-    console.error('Vercel SMTP error:', err);
-    return res.status(200).json({
-      success: true,
-      delivered: false,
-      previewCode: code,
-      code,
-      error: err?.message,
-      message: `Code de sécurité généré pour ${cleanEmail} !`
+    console.error('SMTP error:', err);
+    return res.status(500).json({
+      success: false,
+      error: `Impossible d'envoyer l'email de réinitialisation : ${err?.message || 'Erreur SMTP'}`
     });
   }
 }

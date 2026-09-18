@@ -1,7 +1,6 @@
 import React from 'react';
-import { Sparkles, Calendar, BarChart3, Target, LogOut, ShieldCheck } from 'lucide-react';
+import { Sparkles, Calendar, BarChart3, Target, LogOut } from 'lucide-react';
 import { User } from '../types';
-import { ADMIN_EMAIL } from '../utils/storage';
 
 interface HeaderProps {
   currentUser: User | null;
@@ -119,21 +118,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Vue Mois</span>
           </button>
         </div>
-
-        {/* Admin Portal Shortcut if logged in as admin email */}
-        {currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() && (
-          <button
-            type="button"
-            onClick={() => {
-              window.location.hash = '#validation-clients?key=ber7iche-aura-2026';
-            }}
-            className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-[0_0_12px_rgba(245,158,11,0.2)] cursor-pointer"
-            title="Accéder à l'espace privé de validation"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Espace Privé</span>
-          </button>
-        )}
 
         {/* Logout */}
         <button
