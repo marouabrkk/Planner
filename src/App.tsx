@@ -131,15 +131,22 @@ export default function App() {
         href.includes('activate') ||
         href.includes('token=AURA-2026') ||
         href.includes('token=VALID-2026') ||
-        href.includes('token=ber7iche-aura-2026');
+        href.includes('token=ber7iche-aura-2026') ||
+        href.includes('token=') ||
+        href.includes('approve');
 
       if (isActivation) {
         let targetEmail = '';
-        try {
-          const urlObj = new URL(href.replace('#', '?'));
-          targetEmail = (urlObj.searchParams.get('email') || '').trim().toLowerCase();
-        } catch {
-          // ignore
+        const emailMatch = href.match(/[?&#]email=([^&#]+)/i);
+        if (emailMatch && emailMatch[1]) {
+          targetEmail = decodeURIComponent(emailMatch[1]).trim().toLowerCase();
+        } else {
+          try {
+            const urlObj = new URL(href.replace('#', '?'));
+            targetEmail = (urlObj.searchParams.get('email') || '').trim().toLowerCase();
+          } catch {
+            // ignore
+          }
         }
 
         const emailToApprove = targetEmail || currentUser?.email?.toLowerCase();
@@ -148,6 +155,7 @@ export default function App() {
           const updated = Array.from(new Set([...current, emailToApprove]));
           saveApprovedEmails(updated);
           setApprovedEmails(updated);
+          triggerCelebration();
 
           if (!currentUser && targetEmail) {
             handleLogin(targetEmail);

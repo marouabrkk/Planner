@@ -296,6 +296,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
       saveApprovedEmails([...currentApproved, clean]);
     }
 
+    const directLink = `${window.location.origin}/#activate?token=AURA-2026&email=${encodeURIComponent(clean)}`;
+    try {
+      navigator.clipboard.writeText(directLink);
+    } catch {
+      // ignore
+    }
+
     try {
       const res = await fetch(`/api/admin/approve?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
         method: 'POST',
@@ -307,12 +314,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showToast(data.message || `Client ${clean} validé avec succès !`);
+        showToast(data.message || `Client ${clean} validé ! Lien d'activation copié dans le presse-papier.`);
       } else {
-        showToast(`Client ${clean} validé (mode local et distant) !`);
+        showToast(`Client ${clean} validé ! Lien d'activation copié.`);
       }
     } catch {
-      showToast(`Client ${clean} validé avec succès !`);
+      showToast(`Client ${clean} validé ! Lien d'activation copié.`);
     }
 
     try {

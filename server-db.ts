@@ -35,7 +35,12 @@ export interface DatabaseSchema {
 const isVercel = Boolean(process.env.VERCEL);
 const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(process.cwd(), 'database.json');
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
-export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com', 'marouaberkiche77@gmail.com'];
+export const ADMIN_EMAILS = [
+  'ber7iche@gmail.com',
+  'maroua144@gmail.com',
+  'marouaberkiche77@gmail.com',
+  'berkichemaroua@gmail.com'
+];
 
 export function isOwnerEmail(email: string): boolean {
   if (!email) return false;

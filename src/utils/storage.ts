@@ -2,18 +2,25 @@ import confetti from 'canvas-confetti';
 import { User, UserData, PaymentSettings } from '../types';
 
 export const ADMIN_EMAIL = 'ber7iche@gmail.com';
-export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com', 'marouaberkiche77@gmail.com'];
+export const ADMIN_EMAILS = [
+  'ber7iche@gmail.com',
+  'maroua144@gmail.com',
+  'marouaberkiche77@gmail.com',
+  'berkichemaroua@gmail.com'
+];
 
 export const DEFAULT_APPROVED_EMAILS: string[] = [
   'ber7iche@gmail.com',
   'maroua144@gmail.com',
-  'marouaberkiche77@gmail.com'
+  'marouaberkiche77@gmail.com',
+  'berkichemaroua@gmail.com'
 ];
 
 export const DEFAULT_AUTH_VAULT: Record<string, string> = {
   'ber7iche@gmail.com': 'Nounoussa7',
   'maroua144@gmail.com': 'Nounoussa7',
-  'marouaberkiche77@gmail.com': 'maroua2026'
+  'marouaberkiche77@gmail.com': 'maroua2026',
+  'berkichemaroua@gmail.com': 'Nounoussa7'
 };
 
 export function getAuthVault(): Record<string, string> {
