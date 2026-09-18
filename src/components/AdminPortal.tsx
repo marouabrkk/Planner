@@ -868,29 +868,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
         {activeTab === 'clients' && (
           <div className="flex flex-col gap-4">
             {/* Direct Activation Help Banner */}
-            <div className="bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-indigo-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="bg-gradient-to-r from-emerald-500/10 via-cyan-500/10 to-indigo-500/10 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="flex flex-col gap-1 text-left w-full">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>Activation instantanée pour vos clients BaridiMob</span>
+                <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span>Validation directe de vos clients</span>
                 </span>
                 <p className="text-[11.5px] text-slate-300 leading-relaxed">
-                  Quand un client vous envoie la preuve de paiement sur Telegram :
-                  <br />• Donnez-lui simplement le <strong>Code d'activation : <span className="text-amber-400 font-mono font-bold bg-amber-500/20 px-1.5 py-0.5 rounded">AURA-2026</span></strong> à saisir sur son écran.
-                  <br />• Ou cliquez sur <strong>"Copier lien"</strong> ci-dessous pour lui envoyer un lien qui valide et ouvre son planner en 1 clic !
+                  Quand un client effectue son virement BaridiMob et vous transmet sa <strong>preuve de paiement</strong> (capture ou reçu) sur Telegram :
+                  <br />• Cliquez simplement sur le bouton vert <strong className="text-emerald-400">"Valider"</strong> en face de son email ci-dessous pour approuver son compte.
+                  <br />• Son accès est immédiatement activé et son planner s'ouvre automatiquement en direct !
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText('AURA-2026');
-                  showToast('Code AURA-2026 copié dans le presse-papiers ! Envoyez-le au client.');
-                }}
-                className="shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-[0_0_15px_rgba(245,158,11,0.3)] cursor-pointer flex items-center gap-1.5"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copier Code : AURA-2026</span>
-              </button>
             </div>
 
             {/* Action bar: Add client manual + Search + Filter */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle, Key, CheckCircle, Send, ShieldAlert, Sparkles } from 'lucide-react';
+import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle, CheckCircle } from 'lucide-react';
 import { PaymentSettings } from '../types';
 import { isOwnerEmail, loadApprovedEmails, saveApprovedEmails, triggerCelebration } from '../utils/storage';
 
@@ -19,71 +19,12 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [livePaymentSettings, setLivePaymentSettings] = useState<PaymentSettings>(initialPaymentSettings);
-  const [activationKey, setActivationKey] = useState('');
-  const [activationMsg, setActivationMsg] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
-
-  // Client payment notification state
-  const [paymentNote, setPaymentNote] = useState('');
-  const [isSendingNotification, setIsSendingNotification] = useState(false);
-  const [notificationSentMsg, setNotificationSentMsg] = useState('');
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const handleActivateWithKey = () => {
-    const raw = activationKey.trim();
-    const upper = raw.toUpperCase();
-    const isValid =
-      raw === 'ber7iche-aura-2026' ||
-      upper === 'AURA-2026' ||
-      upper === 'VALID-2026' ||
-      upper === 'AURA2026' ||
-      upper === '2026' ||
-      upper === 'AURA' ||
-      isOwnerEmail(userEmail);
-
-    if (isValid) {
-      const current = loadApprovedEmails();
-      const updated = Array.from(new Set([...current, userEmail.toLowerCase()]));
-      saveApprovedEmails(updated);
-      setIsSuccess(true);
-      triggerCelebration();
-      setActivationMsg('Compte validé avec succès ! Accès accordé.');
-      setTimeout(() => {
-        onRefreshCheck();
-      }, 700);
-    } else {
-      setActivationMsg('Code invalide. Veuillez vérifier le code d’activation.');
-    }
-  };
-
-  // Notify admin via Email that client made the payment
-  const handleNotifyAdmin = async () => {
-    if (isSendingNotification) return;
-    setIsSendingNotification(true);
-    setNotificationSentMsg('');
-
-    try {
-      const res = await fetch('/api/payment/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: userEmail, note: paymentNote.trim() })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        setNotificationSentMsg('Demande transmise avec succès à l’administrateur ! Vous recevrez un email de confirmation dès validation.');
-      } else {
-        setNotificationSentMsg('Demande enregistrée. L’administrateur va vérifier votre paiement.');
-      }
-    } catch {
-      setNotificationSentMsg('Demande enregistrée. L’administrateur va vérifier votre paiement.');
-    } finally {
-      setIsSendingNotification(false);
-    }
   };
 
   // Poll server for latest payment details & user approval status
@@ -103,7 +44,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       })
       .catch(() => {});
 
-    // 2. Poll server every 3.5s to see if admin approved this account in Gmail or Admin portal
+    // 2. Poll server every 3s to see if admin approved this account in Admin portal
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
@@ -122,7 +63,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       } catch {
         // silent retry
       }
-    }, 3500);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [userEmail, onRefreshCheck]);
@@ -173,14 +114,14 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
         <div>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 mb-2">
             <Clock className="w-3 h-3 animate-pulse" />
-            <span>Compte créé — En attente de paiement & validation</span>
+            <span>Compte créé — En attente de validation</span>
           </span>
           <h2 className="text-xl sm:text-2xl font-extrabold text-white">
             {isSuccess ? 'Accès Validé !' : 'Activez votre accès au Planner'}
           </h2>
           <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-md mx-auto">
             Votre compte (<strong className="text-cyan-300">{userEmail}</strong>) a été enregistré.
-            Pour débloquer l'accès complet, veuillez régler votre abonnement. L'administrateur validera votre compte dès confirmation du paiement.
+            Pour activer votre accès, veuillez effectuer le paiement par BaridiMob puis envoyer votre preuve de paiement sur Telegram. L'administrateur validera immédiatement votre compte.
           </p>
         </div>
 
@@ -219,100 +160,25 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             </button>
           </div>
 
-          {/* Send Payment Notification to Admin */}
-          <div className="bg-[#121724] border border-amber-500/30 p-3 rounded-xl flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
-                <Send className="w-3.5 h-3.5 text-amber-400" />
-                <span>Vous avez fait le virement ? Notifiez l'administrateur</span>
-              </span>
-            </div>
-            <p className="text-[10.5px] text-slate-400 leading-normal">
-              Indiquez votre nom ou numéro de transaction pour accélérer la validation de votre compte :
-            </p>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                placeholder="Ex: Virement fait par Fatima B. (ou N° transaction)"
-                value={paymentNote}
-                onChange={(e) => setPaymentNote(e.target.value)}
-                className="flex-1 bg-[#0b0e17] border border-[#262f47] focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-slate-500"
-              />
-              <button
-                type="button"
-                onClick={handleNotifyAdmin}
-                disabled={isSendingNotification}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shrink-0 cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
-              >
-                {isSendingNotification ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Send className="w-3.5 h-3.5" />
-                )}
-                <span>Notifier l'admin</span>
-              </button>
-            </div>
-            {notificationSentMsg && (
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5">
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>{notificationSentMsg}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Telegram Instructions Box */}
-          <div className="bg-[#172133] border border-sky-500/30 p-3 rounded-xl flex flex-col gap-1.5 text-[11px] text-slate-300">
-            <div className="font-semibold text-sky-400 flex items-center gap-1.5">
+          {/* Telegram Instructions Box - Proof of payment */}
+          <div className="bg-[#172133] border border-sky-500/30 p-3.5 rounded-xl flex flex-col gap-2 text-slate-300">
+            <div className="font-bold text-sky-400 flex items-center gap-1.5 text-xs">
               <MessageCircle className="w-4 h-4 text-sky-400" />
-              <span>Assistance & Reçu sur Telegram :</span>
+              <span>Envoi de la preuve de paiement</span>
             </div>
-            <p className="leading-relaxed text-slate-300 text-[11px]">
-              Vous pouvez aussi envoyer directement votre capture d’écran de paiement sur Telegram pour validation immédiate :
+            <p className="leading-relaxed text-slate-300 text-xs">
+              Une fois votre virement effectué, envoyez directement votre <strong>capture d’écran ou reçu de virement</strong> sur Telegram. L'administrateur validera immédiatement votre compte.
             </p>
             <a
               href="https://t.me/maroua144"
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-1 inline-flex items-center justify-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold px-3 py-2 rounded-lg transition-all text-xs"
+              className="mt-1 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold px-4 py-2.5 rounded-xl transition-all text-xs shadow-[0_0_15px_rgba(14,165,233,0.3)]"
             >
-              <span>Envoyer ma capture sur Telegram (@maroua144)</span>
-              <span className="text-[10px] text-sky-200">↗</span>
+              <MessageCircle className="w-4 h-4" />
+              <span>Envoyer ma preuve de paiement sur Telegram (@maroua144)</span>
+              <span className="text-[11px]">↗</span>
             </a>
-          </div>
-
-          {/* Direct Key Activation Box */}
-          <div className="bg-[#171c2c] border border-cyan-500/30 p-3 rounded-xl flex flex-col gap-2 text-left">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Vous avez reçu un code d'activation ?</span>
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Ex: AURA-2026"
-                value={activationKey}
-                onChange={(e) => {
-                  setActivationKey(e.target.value);
-                  setActivationMsg('');
-                }}
-                className="flex-1 bg-[#0e121d] border border-cyan-500/30 focus:border-cyan-400 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-slate-500"
-              />
-              <button
-                type="button"
-                onClick={handleActivateWithKey}
-                className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shrink-0 cursor-pointer shadow-sm"
-              >
-                Activer
-              </button>
-            </div>
-            {activationMsg && (
-              <span className={`text-[11px] font-medium flex items-center gap-1 ${isSuccess ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {isSuccess ? <CheckCircle className="w-3.5 h-3.5" /> : null}
-                <span>{activationMsg}</span>
-              </span>
-            )}
           </div>
         </div>
 
