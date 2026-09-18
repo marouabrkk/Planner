@@ -167,3 +167,62 @@ export function savePaymentSettings(settings: PaymentSettings): void {
     // fallback
   }
 }
+
+export interface RegisteredUserRecord {
+  email: string;
+  status: 'pending' | 'approved';
+  createdAt: string;
+}
+
+export function savePendingRegistration(email: string): void {
+  try {
+    const clean = email.trim().toLowerCase();
+    const raw = localStorage.getItem('aura_registered_users');
+    const existing: RegisteredUserRecord[] = raw ? JSON.parse(raw) : [];
+    const index = existing.findIndex(u => u.email.toLowerCase() === clean);
+    if (index >= 0) {
+      existing[index].status = existing[index].status || 'pending';
+    } else {
+      existing.push({
+        email: clean,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      });
+    }
+    localStorage.setItem('aura_registered_users', JSON.stringify(existing));
+  } catch (e) {
+    console.error('Failed to save pending registration', e);
+  }
+}
+
+export function loadPendingRegistrations(): RegisteredUserRecord[] {
+  try {
+    const raw = localStorage.getItem('aura_registered_users');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Failed to load pending registrations', e);
+  }
+  return [];
+}
+
+export function markRegistrationApprovedLocally(email: string): void {
+  try {
+    const clean = email.trim().toLowerCase();
+    const raw = localStorage.getItem('aura_registered_users');
+    const existing: RegisteredUserRecord[] = raw ? JSON.parse(raw) : [];
+    const updated = existing.map(u => u.email.toLowerCase() === clean ? { ...u, status: 'approved' as const } : u);
+    if (!updated.some(u => u.email.toLowerCase() === clean)) {
+      updated.push({
+        email: clean,
+        status: 'approved',
+        createdAt: new Date().toISOString()
+      });
+    }
+    localStorage.setItem('aura_registered_users', JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to update registration status', e);
+  }
+}
