@@ -191,15 +191,17 @@ export default function App() {
     localStorage.setItem('aura_current_user', JSON.stringify(user));
     setCurrentUser(user);
 
-    // Auto-approve if owner or in default list
-    const updated = Array.from(new Set([
-      ...approvedEmails,
-      email.toLowerCase(),
-      ...ADMIN_EMAILS.map(e => e.toLowerCase()),
-      ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase())
-    ]));
-    setApprovedEmails(updated);
-    saveApprovedEmails(updated);
+    // Only auto-approve if owner! Clients must be validated by admin after payment
+    if (isOwner) {
+      const updated = Array.from(new Set([
+        ...approvedEmails,
+        email.toLowerCase(),
+        ...ADMIN_EMAILS.map(e => e.toLowerCase()),
+        ...DEFAULT_APPROVED_EMAILS.map(e => e.toLowerCase())
+      ]));
+      setApprovedEmails(updated);
+      saveApprovedEmails(updated);
+    }
     refreshApprovalStatus();
   };
 

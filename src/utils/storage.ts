@@ -7,16 +7,12 @@ export const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com', 'marou
 export const DEFAULT_APPROVED_EMAILS: string[] = [
   'ber7iche@gmail.com',
   'maroua144@gmail.com',
-  'testclient@gmail.com',
-  'nouvelle.cliente@gmail.com',
   'marouaberkiche77@gmail.com'
 ];
 
 export const DEFAULT_AUTH_VAULT: Record<string, string> = {
   'ber7iche@gmail.com': 'Nounoussa7',
   'maroua144@gmail.com': 'Nounoussa7',
-  'nouvelle.cliente@gmail.com': 'supermonnouveaump2026',
-  'testclient@gmail.com': 'client1234',
   'marouaberkiche77@gmail.com': 'maroua2026'
 };
 

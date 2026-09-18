@@ -72,6 +72,115 @@ async function sendVerificationCodeEmail(targetEmail: string, code: string): Pro
   }
 }
 
+// Helper: send payment request email to Admin Gmail
+async function sendNewClientPaymentNotificationToAdmin(clientEmail: string, originUrl: string, note?: string): Promise<{ delivered: boolean; error?: string }> {
+  const { user, pass, from, isConfigured } = getSmtpConfig();
+  if (!isConfigured) {
+    console.log(`[AURA DEMO] Nouvelle demande de paiement pour ${clientEmail}`);
+    return { delivered: false, error: 'SMTP_NOT_CONFIGURED' };
+  }
+
+  const quickApproveUrl = `${originUrl}/api/admin/quick-approve?email=${encodeURIComponent(clientEmail)}&key=${ADMIN_SECRET_KEY}`;
+  const adminPortalUrl = `${originUrl}/#validation-clients?key=${ADMIN_SECRET_KEY}`;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass }
+    });
+
+    await transporter.sendMail({
+      from,
+      to: ADMIN_EMAIL,
+      subject: `🔔 Nouvelle demande d'inscription et paiement : ${clientEmail}`,
+      text: `Bonjour,\n\nUne nouvelle demande d'inscription & paiement vient d'être enregistrée sur AURA Master Planner !\n\nClient : ${clientEmail}\nDate : ${new Date().toLocaleString('fr-FR')}\nMode : BaridiMob (RIP: 00799999002934604547)\n${note ? `Note : ${note}\n` : ''}\nLien de validation immédiate en 1 clic : ${quickApproveUrl}\n\nAccéder au portail d'administration : ${adminPortalUrl}\n\nL'équipe AURA`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b0e17; color: #f8fafc; padding: 32px 24px; border-radius: 16px; max-width: 520px; margin: 0 auto; border: 1px solid #1c2235;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <div style="display: inline-block; background: linear-gradient(135deg, #f59e0b, #ec4899); color: white; width: 48px; height: 48px; line-height: 48px; font-size: 24px; border-radius: 14px; text-align: center;">💳</div>
+            <h1 style="color: #ffffff; font-size: 19px; font-weight: 800; margin: 12px 0 2px;">Nouvelle Demande de Paiement</h1>
+            <p style="color: #94a3b8; font-size: 12px; margin: 0;">AURA Master Planner - Notification Administrateur</p>
+          </div>
+          <div style="background-color: #141926; border: 1px solid #22293d; padding: 20px; border-radius: 12px; margin-bottom: 24px;">
+            <p style="margin: 0 0 6px; font-size: 12px; color: #94a3b8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Client en attente de validation :</p>
+            <p style="margin: 0 0 14px; font-size: 17px; font-weight: 800; color: #38bdf8;">${clientEmail}</p>
+            <p style="margin: 0 0 6px; font-size: 12px; color: #cbd5e1;"><strong>Mode de paiement :</strong> BaridiMob (RIP 00799999002934604547)</p>
+            <p style="margin: 0 0 6px; font-size: 12px; color: #cbd5e1;"><strong>Date & Heure :</strong> ${new Date().toLocaleString('fr-FR')}</p>
+            ${note ? `<div style="margin-top: 10px; padding: 10px; background: #1c2336; border-radius: 8px; font-size: 12px; color: #fcd34d;"><strong>Message du client :</strong> ${note}</div>` : ''}
+          </div>
+          <div style="text-align: center; margin-bottom: 20px;">
+            <a href="${quickApproveUrl}" style="display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 800; font-size: 14px; text-decoration: none; padding: 14px 28px; border-radius: 12px; box-shadow: 0 0 25px rgba(16,185,129,0.4);">
+              ✅ Valider ce client directement (1 Clic)
+            </a>
+          </div>
+          <p style="text-align: center; margin: 0; font-size: 11.5px; color: #64748b;">
+            Ou connectez-vous sur votre <a href="${adminPortalUrl}" style="color: #818cf8; text-decoration: underline;">Espace Privé de Gestion</a>.
+          </p>
+        </div>
+      `
+    });
+
+    console.log(`[AURA PAYMENT ALERT] Notification envoyée à l'admin ${ADMIN_EMAIL} pour le client ${clientEmail}`);
+    return { delivered: true };
+  } catch (err: any) {
+    console.error('Erreur notification paiement admin:', err);
+    return { delivered: false, error: err?.message };
+  }
+}
+
+// Helper: send client approval email to Client Gmail
+async function sendClientApprovedNotification(clientEmail: string, originUrl: string): Promise<{ delivered: boolean; error?: string }> {
+  const { user, pass, from, isConfigured } = getSmtpConfig();
+  if (!isConfigured) return { delivered: false, error: 'SMTP_NOT_CONFIGURED' };
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass }
+    });
+
+    await transporter.sendMail({
+      from,
+      to: clientEmail,
+      subject: `🎉 Votre compte AURA Master Planner est validé !`,
+      text: `Bonjour,\n\nExcellente nouvelle ! Votre paiement a été vérifié et votre compte AURA Master Planner (${clientEmail}) est validé avec succès par l'administrateur.\n\nVous bénéficiez maintenant d'un accès illimité à l'ensemble du planner.\n\nAccédez à votre compte : ${originUrl}\n\nL'équipe AURA Master Planner`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b0e17; color: #f8fafc; padding: 32px 24px; border-radius: 16px; max-width: 500px; margin: 0 auto; border: 1px solid #1c2235;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <div style="display: inline-block; background: linear-gradient(135deg, #10b981, #06b6d4); color: white; width: 48px; height: 48px; line-height: 48px; font-size: 24px; border-radius: 14px; text-align: center;">✨</div>
+            <h1 style="color: #ffffff; font-size: 20px; font-weight: 800; margin: 12px 0 2px;">Compte Activé avec Succès !</h1>
+            <p style="color: #34d399; font-size: 13px; font-weight: 600; margin: 0;">Paiement confirmé par l'administrateur</p>
+          </div>
+          <div style="background-color: #141926; border: 1px solid #22293d; padding: 22px; border-radius: 12px; text-align: center; margin-bottom: 24px;">
+            <p style="color: #cbd5e1; font-size: 13.5px; line-height: 1.6; margin: 0 0 18px;">
+              Bonjour,<br/>
+              Votre règlement a été validé ! Votre accès à l'ensemble du <strong>Planner AURA</strong> (gestion des tâches, cours, calendrier et suivi des habitudes) est maintenant actif.
+            </p>
+            <a href="${originUrl}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #06b6d4); color: #ffffff; font-weight: 800; font-size: 14px; text-decoration: none; padding: 12px 28px; border-radius: 10px; box-shadow: 0 0 20px rgba(99,102,241,0.35);">
+              Accéder à mon Planner 🚀
+            </a>
+          </div>
+          <p style="color: #64748b; font-size: 11px; text-align: center; margin: 0;">
+            Merci pour votre confiance. L'équipe AURA Master Planner.
+          </p>
+        </div>
+      `
+    });
+
+    console.log(`[AURA CLIENT APPROVED] Email de confirmation envoyé à ${clientEmail}`);
+    return { delivered: true };
+  } catch (err: any) {
+    console.error('Erreur confirmation client:', err);
+    return { delivered: false, error: err?.message };
+  }
+}
+
+function getOriginUrl(req: express.Request): string {
+  const forwardedProto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+  return `${forwardedProto}://${host}`;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -143,6 +252,13 @@ async function startServer() {
     db.users.push(newUser);
     writeDb(db);
 
+    if (!isOwner) {
+      // Notify admin about new registration & payment request in background
+      sendNewClientPaymentNotificationToAdmin(cleanEmail, getOriginUrl(req)).catch((err) => {
+        console.error('Failed to send admin payment alert on registration:', err);
+      });
+    }
+
     res.json({
       user: {
         id: newUser.id,
@@ -150,7 +266,8 @@ async function startServer() {
         role: newUser.role,
         status: newUser.status,
         createdAt: newUser.createdAt
-      }
+      },
+      message: isOwner ? 'Compte administrateur validé' : 'Compte créé ! Demande de validation transmise.'
     });
   });
 
@@ -441,6 +558,10 @@ async function startServer() {
       };
       db.users.push(newUser);
       writeDb(db);
+
+      // Send approval confirmation email to client
+      sendClientApprovedNotification(cleanEmail, getOriginUrl(req)).catch(() => {});
+
       return res.json({ success: true, message: `Compte ${cleanEmail} créé et approuvé !`, user: newUser });
     }
 
@@ -448,7 +569,126 @@ async function startServer() {
     user.approvedAt = new Date().toISOString();
     writeDb(db);
 
+    // Send approval confirmation email to client
+    sendClientApprovedNotification(cleanEmail, getOriginUrl(req)).catch(() => {});
+
     res.json({ success: true, message: `Compte ${cleanEmail} validé avec succès !`, user });
+  });
+
+  // Admin: 1-Click Quick-Approve via Email link
+  app.get('/api/admin/quick-approve', async (req, res) => {
+    const key = (req.query.key as string) || '';
+    const email = (req.query.email as string) || '';
+
+    if (key !== ADMIN_SECRET_KEY) {
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Accès Refusé</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <style>
+              body { margin: 0; background: #0a0c13; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+              .card { background: #111522; border: 1px solid #ef4444; border-radius: 20px; padding: 36px 28px; max-width: 440px; width: 100%; text-align: center; }
+              h1 { color: #f87171; font-size: 20px; margin: 12px 0 8px; }
+              p { color: #94a3b8; font-size: 13px; line-height: 1.5; margin: 0; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div style="font-size: 40px;">⛔</div>
+              <h1>Accès Refusé</h1>
+              <p>Clé de sécurité administrateur invalide ou lien expiré.</p>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <body style="background: #0a0c13; color: #fff; font-family: sans-serif; text-align: center; padding: 40px;">
+            <h2>Email manquant ou invalide</h2>
+          </body>
+        </html>
+      `);
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const db = readDb();
+    let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+
+    if (!user) {
+      user = {
+        id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+        email: cleanEmail,
+        status: 'approved',
+        role: 'client',
+        createdAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString()
+      };
+      db.users.push(user);
+    } else {
+      user.status = 'approved';
+      user.approvedAt = new Date().toISOString();
+    }
+    writeDb(db);
+
+    const origin = getOriginUrl(req);
+    // Send confirmation email to client in background
+    sendClientApprovedNotification(cleanEmail, origin).catch(() => {});
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Client Validé - AURA Planner</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <style>
+            body { margin: 0; background: #0a0c13; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+            .card { background: #111522; border: 1px solid #10b981; border-radius: 20px; padding: 36px 28px; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 0 50px rgba(16,185,129,0.25); }
+            .icon { width: 64px; height: 64px; border-radius: 16px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 16px; }
+            h1 { font-size: 22px; font-weight: 800; margin: 0 0 8px; color: #ffffff; }
+            p { font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0 0 20px; }
+            .badge { display: inline-block; background: #172133; border: 1px solid #38bdf8; color: #38bdf8; font-weight: 700; padding: 8px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 24px; word-break: break-all; }
+            .btn { display: inline-block; background: linear-gradient(135deg, #6366f1, #06b6d4); color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; padding: 12px 24px; border-radius: 10px; box-shadow: 0 0 15px rgba(99,102,241,0.3); }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">✅</div>
+            <h1>Client Validé avec Succès !</h1>
+            <div class="badge">${cleanEmail}</div>
+            <p>
+              Le compte de ce client a été activé. Un email de confirmation a été envoyé à son adresse Gmail et son accès au Planner est immédiatement débloqué.
+            </p>
+            <a class="btn" href="${origin}/#validation-clients?key=${ADMIN_SECRET_KEY}">Ouvrir l'Espace Privé de Gestion</a>
+          </div>
+        </body>
+      </html>
+    `);
+  });
+
+  // Client: Notify Admin about payment made
+  app.post('/api/payment/notify', async (req, res) => {
+    const { email, note } = req.body || {};
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+      return res.status(400).json({ error: 'Email requis et valide.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const origin = getOriginUrl(req);
+    const result = await sendNewClientPaymentNotificationToAdmin(cleanEmail, origin, note);
+
+    res.json({
+      success: true,
+      delivered: result.delivered,
+      message: `Notification transmise à l'administrateur (${ADMIN_EMAIL}) !`
+    });
   });
 
   // Admin: Revoke client

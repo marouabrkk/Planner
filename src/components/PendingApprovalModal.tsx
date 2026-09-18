@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle, Key, CheckCircle } from 'lucide-react';
+import { Clock, Copy, Check, RefreshCw, LogOut, MessageCircle, Key, CheckCircle, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import { PaymentSettings } from '../types';
-import { isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
+import { isOwnerEmail, loadApprovedEmails, saveApprovedEmails, triggerCelebration } from '../utils/storage';
 
 interface PendingApprovalModalProps {
   userEmail: string;
@@ -22,6 +22,11 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
   const [activationKey, setActivationKey] = useState('');
   const [activationMsg, setActivationMsg] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+
+  // Client payment notification state
+  const [paymentNote, setPaymentNote] = useState('');
+  const [isSendingNotification, setIsSendingNotification] = useState(false);
+  const [notificationSentMsg, setNotificationSentMsg] = useState('');
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -46,18 +51,43 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       const updated = Array.from(new Set([...current, userEmail.toLowerCase()]));
       saveApprovedEmails(updated);
       setIsSuccess(true);
+      triggerCelebration();
       setActivationMsg('Compte validé avec succès ! Accès accordé.');
       setTimeout(() => {
         onRefreshCheck();
-      }, 600);
+      }, 700);
     } else {
-      setActivationMsg('Code invalide. Veuillez vérifier le code d’activation reçu sur Telegram.');
+      setActivationMsg('Code invalide. Veuillez vérifier le code d’activation.');
     }
   };
 
-  // Poll server for latest payment details & user approval
+  // Notify admin via Email that client made the payment
+  const handleNotifyAdmin = async () => {
+    if (isSendingNotification) return;
+    setIsSendingNotification(true);
+    setNotificationSentMsg('');
+
+    try {
+      const res = await fetch('/api/payment/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: userEmail, note: paymentNote.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setNotificationSentMsg('Demande transmise avec succès à l’administrateur ! Vous recevrez un email de confirmation dès validation.');
+      } else {
+        setNotificationSentMsg('Demande enregistrée. L’administrateur va vérifier votre paiement.');
+      }
+    } catch {
+      setNotificationSentMsg('Demande enregistrée. L’administrateur va vérifier votre paiement.');
+    } finally {
+      setIsSendingNotification(false);
+    }
+  };
+
+  // Poll server for latest payment details & user approval status
   useEffect(() => {
-    // If user is owner, auto-approve immediately
     if (isOwnerEmail(userEmail)) {
       const current = loadApprovedEmails();
       saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
@@ -65,7 +95,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       return;
     }
 
-    // 1. Fetch payment settings
+    // 1. Fetch live payment settings
     fetch('/api/payment-settings')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -73,7 +103,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       })
       .catch(() => {});
 
-    // 2. Interval to check approval status automatically every 4 seconds
+    // 2. Poll server every 3.5s to see if admin approved this account in Gmail or Admin portal
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
@@ -81,13 +111,18 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
         if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
           if (data.approved) {
-            onRefreshCheck();
+            setIsSuccess(true);
+            triggerCelebration();
+            clearInterval(interval);
+            setTimeout(() => {
+              onRefreshCheck();
+            }, 600);
           }
         }
       } catch {
         // silent retry
       }
-    }, 4000);
+    }, 3500);
 
     return () => clearInterval(interval);
   }, [userEmail, onRefreshCheck]);
@@ -107,7 +142,11 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data.approved) {
-          onRefreshCheck();
+          setIsSuccess(true);
+          triggerCelebration();
+          setTimeout(() => {
+            onRefreshCheck();
+          }, 500);
           return;
         }
       }
@@ -120,25 +159,36 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0c13]/95 backdrop-blur-md p-4">
-      <div className="bg-[#111522] border border-amber-500/40 rounded-2xl p-6 sm:p-8 max-w-md w-full text-center flex flex-col gap-4 shadow-[0_0_50px_rgba(245,158,11,0.2)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0c13]/95 backdrop-blur-md p-4 overflow-y-auto">
+      <div className="bg-[#111522] border border-amber-500/40 rounded-2xl p-6 sm:p-8 max-w-lg w-full text-center flex flex-col gap-4 shadow-[0_0_60px_rgba(245,158,11,0.2)] my-auto relative">
+        {/* Glow decorative effects */}
+        <div className="absolute -top-12 -right-12 w-40 h-40 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Icon & Heading */}
         <div className="w-16 h-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-3xl shadow-[0_0_20px_rgba(245,158,11,0.25)]">
-          ⏳
+          {isSuccess ? '🎉' : '⏳'}
         </div>
 
         <div>
-          <h2 className="text-xl font-extrabold text-white">Compte en attente d'activation</h2>
-          <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-            Votre compte (<strong className="text-slate-200">{userEmail}</strong>) a bien été enregistré.
-            Pour débloquer l'accès complet au planner et synchroniser vos données, veuillez régler votre abonnement.
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 mb-2">
+            <Clock className="w-3 h-3 animate-pulse" />
+            <span>Compte créé — En attente de paiement & validation</span>
+          </span>
+          <h2 className="text-xl sm:text-2xl font-extrabold text-white">
+            {isSuccess ? 'Accès Validé !' : 'Activez votre accès au Planner'}
+          </h2>
+          <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-md mx-auto">
+            Votre compte (<strong className="text-cyan-300">{userEmail}</strong>) a été enregistré.
+            Pour débloquer l'accès complet, veuillez régler votre abonnement. L'administrateur validera votre compte dès confirmation du paiement.
           </p>
         </div>
 
         {/* Payment Details Box */}
-        <div className="bg-[#171c2c] border border-dashed border-[#22293d] p-4 rounded-xl text-left text-xs text-slate-200 flex flex-col gap-2.5">
+        <div className="bg-[#171c2c] border border-dashed border-[#22293d] p-4 rounded-xl text-left text-xs text-slate-200 flex flex-col gap-3">
           <div className="font-bold text-amber-400 flex items-center justify-between border-b border-[#22293d] pb-2">
-            <span>💳 Paiement BaridiMob (RIP)</span>
-            <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-md font-semibold border border-amber-500/30">Instantané</span>
+            <span>💳 Coordonnées BaridiMob (Algérie Poste)</span>
+            <span className="text-[10px] bg-emerald-500/15 text-emerald-300 px-2 py-0.5 rounded-md font-semibold border border-emerald-500/30">Instantané</span>
           </div>
 
           {/* BaridiMob RIP Box */}
@@ -169,14 +219,55 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             </button>
           </div>
 
+          {/* Send Payment Notification to Admin */}
+          <div className="bg-[#121724] border border-amber-500/30 p-3 rounded-xl flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+                <Send className="w-3.5 h-3.5 text-amber-400" />
+                <span>Vous avez fait le virement ? Notifiez l'administrateur</span>
+              </span>
+            </div>
+            <p className="text-[10.5px] text-slate-400 leading-normal">
+              Indiquez votre nom ou numéro de transaction pour accélérer la validation de votre compte :
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                placeholder="Ex: Virement fait par Fatima B. (ou N° transaction)"
+                value={paymentNote}
+                onChange={(e) => setPaymentNote(e.target.value)}
+                className="flex-1 bg-[#0b0e17] border border-[#262f47] focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-slate-500"
+              />
+              <button
+                type="button"
+                onClick={handleNotifyAdmin}
+                disabled={isSendingNotification}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition-colors shrink-0 cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+              >
+                {isSendingNotification ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                <span>Notifier l'admin</span>
+              </button>
+            </div>
+            {notificationSentMsg && (
+              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{notificationSentMsg}</span>
+              </div>
+            )}
+          </div>
+
           {/* Telegram Instructions Box */}
           <div className="bg-[#172133] border border-sky-500/30 p-3 rounded-xl flex flex-col gap-1.5 text-[11px] text-slate-300">
             <div className="font-semibold text-sky-400 flex items-center gap-1.5">
               <MessageCircle className="w-4 h-4 text-sky-400" />
-              <span>Activation de votre accès :</span>
+              <span>Assistance & Reçu sur Telegram :</span>
             </div>
-            <p className="leading-relaxed text-slate-300">
-              Une fois le virement effectué via BaridiMob, envoyez la <strong>capture / preuve de paiement</strong> sur Telegram. Vous recevrez instantanément votre <strong>code d'activation</strong> pour débloquer votre accès ci-dessous :
+            <p className="leading-relaxed text-slate-300 text-[11px]">
+              Vous pouvez aussi envoyer directement votre capture d’écran de paiement sur Telegram pour validation immédiate :
             </p>
             <a
               href="https://t.me/maroua144"
@@ -184,8 +275,8 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
               rel="noopener noreferrer"
               className="mt-1 inline-flex items-center justify-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold px-3 py-2 rounded-lg transition-all text-xs"
             >
-              <span>Envoyer ma preuve sur Telegram (@maroua144)</span>
-              <span className="text-[10px] text-sky-200 underline">Ouvrir ↗</span>
+              <span>Envoyer ma capture sur Telegram (@maroua144)</span>
+              <span className="text-[10px] text-sky-200">↗</span>
             </a>
           </div>
 
@@ -194,7 +285,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Saisir votre code d'activation reçu</span>
+                <span>Vous avez reçu un code d'activation ?</span>
               </span>
             </div>
             <div className="flex gap-2">
@@ -234,7 +325,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.3)] transition-all cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
-            <span>{isChecking ? 'Vérification...' : 'Vérifier si mon compte a été activé'}</span>
+            <span>{isChecking ? 'Vérification en cours...' : 'Vérifier si mon compte a été activé'}</span>
           </button>
 
           <button
