@@ -13,16 +13,11 @@ export function isOwnerEmail(email: string): boolean {
 export const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tflqmnmdhkxihlywekqs.supabase.co';
 export const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_secret_rN0ms_ZMSU-L0OXTE4mAUQ_sBMnhAa9';
 
-function getSupabaseHeaders(upsert = false) {
-  const headers: Record<string, string> = {
+function getSupabaseHeaders() {
+  return {
     'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${SUPABASE_KEY}`,
     'Content-Type': 'application/json'
   };
-  if (upsert) {
-    headers['Prefer'] = 'resolution=merge-duplicates';
-  }
-  return headers;
 }
 
 // 2. BASE LOCALE (FALLBACK)
@@ -53,7 +48,7 @@ export function writeDb(data: any): void {
   } catch {}
 }
 
-// 3. RÉCUPÉRER UN CLIENT (SUPABASE + LOCAL)
+// 3. RÉCUPÉRER UN CLIENT DANS SUPABASE
 export async function supabaseGetUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
 
@@ -76,12 +71,12 @@ export async function supabaseGetUser(email: string) {
   return localUser || null;
 }
 
-// 4. SAUVEGARDER UN CLIENT DANS LES 4 COLONNES RÉELLES (id, email, password, status)
-export async function supabaseSaveUser(user: { id?: string; email: string; password?: string; status?: string; role?: string }) {
+// 4. CRÉER OU METTRE À JOUR UN CLIENT AVEC SON GMAIL ET SON MOT DE PASSE
+export async function supabaseSaveUser(user: { id?: string; email: string; password?: string; status?: string }) {
   const cleanEmail = user.email.trim().toLowerCase();
   const safeId = user.id || 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
   const userPassword = user.password || 'aura2026';
-  const userStatus = user.status || (isOwnerEmail(cleanEmail) ? 'approved' : 'pending');
+  const userStatus = user.status || (isOwnerEmail(cleanEmail) ? 'approved' : 'approved');
 
   const db = readDb();
   if (!db.users) db.users = [];
@@ -90,8 +85,7 @@ export async function supabaseSaveUser(user: { id?: string; email: string; passw
     id: safeId,
     email: cleanEmail,
     password: userPassword,
-    status: userStatus,
-    role: isOwnerEmail(cleanEmail) ? 'admin' : 'client'
+    status: userStatus
   };
 
   if (existingIdx >= 0) {
@@ -102,14 +96,14 @@ export async function supabaseSaveUser(user: { id?: string; email: string; passw
   writeDb(db);
 
   try {
-    // Vérifier si le client existe déjà dans Supabase
+    // Vérifier si le client existe déjà
     const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=id`, {
       headers: getSupabaseHeaders()
     });
     const checkData = checkRes.ok ? await checkRes.json() : [];
 
     if (Array.isArray(checkData) && checkData.length > 0) {
-      // Met à jour seulement password et status (colonnes qui existent)
+      // Si le client existe déjà, on met à jour son mot de passe et son statut
       await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
         method: 'PATCH',
         headers: getSupabaseHeaders(),
@@ -119,7 +113,7 @@ export async function supabaseSaveUser(user: { id?: string; email: string; passw
         })
       });
     } else {
-      // Insère uniquement les 4 colonnes réelles : id, email, password, status
+      // Sinon, on l'insère directement dans Supabase
       await fetch(`${SUPABASE_URL}/rest/v1/users`, {
         method: 'POST',
         headers: getSupabaseHeaders(),
@@ -138,12 +132,11 @@ export async function supabaseSaveUser(user: { id?: string; email: string; passw
   return updatedUser;
 }
 
-// 5. VALIDER UN CLIENT DANS SUPABASE (FONCTIONNE À TOUS LES COUPS)
+// 5. APPROUVER UN CLIENT DEPUIS LA CONSOLE ADMIN
 export async function supabaseApproveUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
   const safeId = 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
 
-  // A. Mise à jour locale
   const db = readDb();
   if (!db.users) db.users = [];
   const existing = db.users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
@@ -153,39 +146,32 @@ export async function supabaseApproveUser(email: string) {
     db.users.push({
       id: safeId,
       email: cleanEmail,
-      password: 'password123',
-      status: 'approved',
-      role: isOwnerEmail(cleanEmail) ? 'admin' : 'client'
+      password: '',
+      status: 'approved'
     });
   }
   writeDb(db);
 
-  // B. Enregistrement direct dans Supabase
   try {
-    // Vérifier si l'utilisateur existe déjà
     const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=id`, {
       headers: getSupabaseHeaders()
     });
     const checkData = checkRes.ok ? await checkRes.json() : [];
 
     if (Array.isArray(checkData) && checkData.length > 0) {
-      // Existe déjà -> on le passe en approved
       await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
         method: 'PATCH',
         headers: getSupabaseHeaders(),
-        body: JSON.stringify({
-          status: 'approved'
-        })
+        body: JSON.stringify({ status: 'approved' })
       });
     } else {
-      // N'existe pas encore -> on l'insère directement dans les 4 colonnes
       await fetch(`${SUPABASE_URL}/rest/v1/users`, {
         method: 'POST',
         headers: getSupabaseHeaders(),
         body: JSON.stringify({
           id: safeId,
           email: cleanEmail,
-          password: existing?.password || 'password123',
+          password: existing?.password || 'aura2026',
           status: 'approved'
         })
       });
@@ -195,7 +181,7 @@ export async function supabaseApproveUser(email: string) {
   }
 }
 
-// 6. LISTE DE TOUS LES CLIENTS POUR LA CONSOLE ADMIN
+// 6. LISTE DE TOUS LES UTILISATEURS
 export async function supabaseGetAllUsers() {
   const db = readDb();
   const localUsers: any[] = db.users || [];
@@ -227,7 +213,7 @@ export async function supabaseGetAllUsers() {
   return Array.from(map.values());
 }
 
-// 7. METTRE À JOUR LE MOT DE PASSE (MOT DE PASSE OUBLIÉ)
+// 7. MODIFICATION DU MOT DE PASSE
 export async function supabaseUpdatePassword(email: string, newPass: string) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -249,7 +235,7 @@ export async function supabaseUpdatePassword(email: string, newPass: string) {
   }
 }
 
-// 8. DONNÉES DU PLANNER (TÂCHES, COURS, HABITUDES)
+// 8. GESTION DES DONNÉES DU PLANNER
 export async function supabaseSaveUserData(email: string, userData: any) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -260,7 +246,7 @@ export async function supabaseSaveUserData(email: string, userData: any) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/user_data`, {
       method: 'POST',
-      headers: getSupabaseHeaders(true),
+      headers: getSupabaseHeaders(),
       body: JSON.stringify({
         email: cleanEmail,
         data: userData
