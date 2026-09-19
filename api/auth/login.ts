@@ -11,27 +11,14 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   const { email, password } = req.body || {};
-  if (!email || typeof email !== 'string' || !email.includes('@')) {
-    return res.status(400).json({ error: 'Email requis et valide.' });
-  }
-  if (!password || typeof password !== 'string') {
-    return res.status(400).json({ error: 'Mot de passe requis.' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email et mot de passe requis.' });
   }
 
   const cleanEmail = email.trim().toLowerCase();
-  const isOwner = ADMIN_EMAILS.includes(cleanEmail);
 
   try {
-    // Si c'est un compte administrateur / propriétaire
-    if (isOwner) {
-      return res.json({
-        success: true,
-        approved: true,
-        user: { id: 'admin_' + btoa(cleanEmail), email: cleanEmail, role: 'admin', status: 'approved' }
-      });
-    }
-
-    // Recherche directe dans la base de données Supabase
+    // 1. Recherche du client dans Supabase
     let user: any = null;
     if (SUPABASE_KEY) {
       const response = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
@@ -42,41 +29,35 @@ export default async function handler(req: any, res: any) {
       });
       if (response.ok) {
         const data = await response.json();
-        if (data && data.length > 0) {
-          user = data[0];
-        }
+        if (data && data.length > 0) user = data[0];
       }
     }
 
-    // Si le compte n'existe pas du tout
+    // 2. Compte propriétaire
+    if (ADMIN_EMAILS.includes(cleanEmail)) {
+      if (password === 'Nounoussa7') {
+        return res.json({ success: true, approved: true, user: { email: cleanEmail, role: 'admin' } });
+      }
+    }
+
+    // 3. Si le client n'existe pas
     if (!user) {
-      return res.status(404).json({
-        error: "Compte introuvable. Veuillez cliquer sur 'Créer un compte' pour vous inscrire."
-      });
+      return res.status(404).json({ error: "Aucun compte trouvé. Veuillez d'abord cliquer sur 'Créer un compte'." });
     }
 
-    // Vérification du mot de passe
-    if (user.password && user.password !== password && password !== 'ber7iche-aura-2026') {
-      return res.status(401).json({
-        error: "Mot de passe incorrect. Veuillez vérifier votre saisie."
-      });
+    // 4. VÉRIFICATION DE SON PROPRE MOT DE PASSE
+    if (user.password !== password) {
+      return res.status(401).json({ error: "Mot de passe incorrect. Veuillez vérifier votre saisie." });
     }
 
-    const isApproved = user.status === 'approved';
-
+    // 5. Si le mot de passe est BON :
     return res.json({
       success: true,
-      approved: isApproved,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        createdAt: user.created_at
-      }
+      approved: user.status === 'approved', // True = Planner ouvert, False = Écran BaridiMob
+      user: { id: user.id, email: user.email, role: user.role, status: user.status }
     });
 
-  } catch (err: any) {
-    return res.status(500).json({ error: "Erreur serveur lors de la connexion." });
+  } catch (err) {
+    return res.status(500).json({ error: "Erreur de connexion." });
   }
 }
