@@ -27,6 +27,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
   }, [resendCooldown]);
 
+  // Détection automatique d'un email pré-rempli ou lien d'activation
+  React.useEffect(() => {
+    try {
+      const urlStr = window.location.href;
+      if (urlStr.includes('activate') || urlStr.includes('email=') || urlStr.includes('token=AURA-2026')) {
+        const match = urlStr.match(/email=([^&?#]+)/);
+        if (match && match[1]) {
+          const extractedEmail = decodeURIComponent(match[1]).trim().toLowerCase();
+          if (extractedEmail.includes('@')) {
+            setEmail(extractedEmail);
+            setSuccessMsg('🎉 Votre compte a été validé ! Entrez votre mot de passe pour ouvrir votre Planner.');
+            setAuthMode('login');
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Request 6-digit code strictly sent by email to Gmail
   const handleRequestCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -224,6 +244,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       if (!res.ok && isJson) {
         const data = await res.json().catch(() => ({}));
         if (data.error && !isMasterKey) {
+          // STRICT SECURITY CHECK: If password is wrong or unauthorized, REJECT IMMEDIATELY! NEVER LOG IN!
+          if (res.status === 401 || data.error.toLowerCase().includes('mot de passe') || data.error.toLowerCase().includes('incorrect')) {
+            setErrorMsg(data.error || 'Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
+            setIsLoading(false);
+            return;
+          }
+
+          // If account doesn't exist yet in login mode
+          if (res.status === 404) {
+            setErrorMsg(data.error || "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'.");
+            setIsLoading(false);
+            return;
+          }
+
           // If error is about pending approval or account already existing in pending
           if (data.error.includes('attente') || data.status === 'pending' || (authMode === 'register' && data.error.includes('existe déjà'))) {
             saveAuthVaultPassword(lowerEmail, password);
@@ -231,29 +265,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
             setIsLoading(false);
             onLogin(lowerEmail, false);
             return;
-          }
-
-          // Check if admin already approved this email on the server (e.g. validated in admin portal)
-          try {
-            const statusRes = await fetch(`/api/auth/status?email=${encodeURIComponent(lowerEmail)}`);
-            if (statusRes.ok) {
-              const statusData = await statusRes.json().catch(() => ({}));
-              if (statusData.approved) {
-                // User was approved by admin! Sync their chosen password so they can log in seamlessly
-                await fetch('/api/auth/reset-password', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email: lowerEmail, newPassword: password })
-                }).catch(() => {});
-                saveAuthVaultPassword(lowerEmail, password);
-                saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-                setIsLoading(false);
-                onLogin(lowerEmail, true);
-                return;
-              }
-            }
-          } catch {
-            // ignore
           }
 
           setErrorMsg(data.error);
@@ -280,9 +291,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
 
       // Verify owner accounts with their authorized passwords
       if (isOwner) {
-        const isOwnerPassValid = password === 'Nounoussa7' || (savedPass && password === savedPass);
+        const isOwnerPassValid = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || (savedPass && password === savedPass);
         if (!isOwnerPassValid) {
-          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre mot de passe ou cliquer sur "Mot de passe oublié ?".');
+          setErrorMsg('Mot de passe administrateur incorrect. Veuillez vérifier votre saisie.');
           setIsLoading(false);
           return;
         }
@@ -292,16 +303,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
-      // For clients: If already approved by admin, allow login and sync password
+      // STRICT CLIENT PASSWORD VERIFICATION:
+      // If client has a saved password, it MUST match exactly!
+      if (savedPass && password !== savedPass) {
+        setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
+        setIsLoading(false);
+        return;
+      }
+
+      // For clients: If approved by admin and no password was ever recorded (first connection setup)
+      // or password matches savedPass:
       if (isPreApproved) {
-        saveAuthVaultPassword(lowerEmail, password);
+        if (!savedPass) {
+          saveAuthVaultPassword(lowerEmail, password);
+        }
         saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-        // Sync password to server in background
-        fetch('/api/auth/reset-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: lowerEmail, newPassword: password })
-        }).catch(() => {});
         onLogin(lowerEmail, true);
         return;
       }

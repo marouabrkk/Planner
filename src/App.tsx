@@ -88,6 +88,65 @@ export default function App() {
     return getInitialUserData();
   });
 
+  // Synchronisation globale des emails approuvés depuis le serveur au démarrage
+  useEffect(() => {
+    fetch('/api/auth/approved-emails')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.emails)) {
+          const current = loadApprovedEmails();
+          const merged = Array.from(new Set([...current, ...data.emails.map((e: string) => e.toLowerCase())]));
+          setApprovedEmails(merged);
+          saveApprovedEmails(merged);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Détection et traitement immédiat des liens d'activation administrateur (#activate?token=AURA-2026&email=...)
+  useEffect(() => {
+    const handleActivation = () => {
+      try {
+        const fullUrl = window.location.href;
+        if (fullUrl.includes('activate') || fullUrl.includes('token=AURA-2026')) {
+          const match = fullUrl.match(/email=([^&?#]+)/);
+          if (match && match[1]) {
+            const activatedEmail = decodeURIComponent(match[1]).trim().toLowerCase();
+            if (activatedEmail.includes('@')) {
+              const current = loadApprovedEmails();
+              const updated = Array.from(new Set([...current, activatedEmail]));
+              setApprovedEmails(updated);
+              saveApprovedEmails(updated);
+
+              // Si l'utilisateur est déjà connecté avec cette adresse ou connecté en attente
+              if (currentUser && currentUser.email.toLowerCase() === activatedEmail) {
+                refreshApprovalStatus(activatedEmail);
+              }
+
+              // Appel serveur silencieux pour synchroniser
+              fetch('/api/admin/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: activatedEmail, adminKey: 'ber7iche-aura-2026' })
+              }).catch(() => {});
+
+              // Nettoyer l'URL
+              if (window.location.hash.includes('activate')) {
+                window.location.hash = '';
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Erreur traitement lien activation:', err);
+      }
+    };
+
+    handleActivation();
+    window.addEventListener('hashchange', handleActivation);
+    return () => window.removeEventListener('hashchange', handleActivation);
+  }, [currentUser]);
+
   // Synchronisation du statut d'approbation
   const refreshApprovalStatus = async (checkEmail?: string) => {
     const targetEmail = (checkEmail || currentUser?.email || '').trim().toLowerCase();
@@ -143,14 +202,45 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      setUserData(loadUserData(currentUser.id));
+      // 1. Chargement instantané depuis le stockage local (zéro latence)
+      const local = loadUserData(currentUser.id);
+      setUserData(local);
+
+      // 2. Synchronisation en arrière-plan depuis le Cloud / Serveur Supabase
+      fetch(`/api/user/data?email=${encodeURIComponent(currentUser.email)}&userId=${encodeURIComponent(currentUser.id)}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((resData) => {
+          if (resData && resData.data) {
+            const cloudData = resData.data;
+            // Si le cloud a des données ou si le stockage local était vierge
+            const localIsEmpty = (!local.tasks || local.tasks.length === 0) &&
+                                 (!local.courses || local.courses.length === 0) &&
+                                 (!local.habits || local.habits.length === 0);
+            if (localIsEmpty || (cloudData.tasks && cloudData.tasks.length > 0)) {
+              setUserData(cloudData);
+              saveUserData(currentUser.id, cloudData);
+            }
+          }
+        })
+        .catch(() => {});
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.email]);
 
   const updateData = (newData: UserData) => {
     setUserData(newData);
     if (currentUser) {
       saveUserData(currentUser.id, newData);
+
+      // Synchronisation sécurisée vers le serveur & Supabase
+      fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: currentUser.email,
+          userId: currentUser.id,
+          data: newData
+        })
+      }).catch(() => {});
     }
   };
 

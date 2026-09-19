@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const rawKey = ((req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey || '').trim().toLowerCase();
+  const rawKey = ((req.headers?.['x-admin-key'] as string) || (req.query?.key as string) || req.body?.adminKey || '').trim().toLowerCase();
   if (!ACCEPTED_KEYS.includes(rawKey)) {
     return res.status(403).json({ error: 'Accès non autorisé.' });
   }
@@ -28,8 +28,8 @@ export default async function handler(req: any, res: any) {
       email: u.email,
       status: u.status,
       role: u.role,
-      createdAt: u.created_at,
-      approvedAt: u.approved_at
+      createdAt: u.created_at || u.createdAt || new Date().toISOString(),
+      approvedAt: u.approved_at || u.approvedAt
     })),
     totalCount: users.length,
     pendingCount: users.filter((u: any) => u.status === 'pending').length,

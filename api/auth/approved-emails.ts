@@ -1,4 +1,4 @@
-import { readDb, ADMIN_EMAILS } from '../../server-db.ts';
+import { supabaseGetAllUsers, ADMIN_EMAILS } from '../../server-db.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,8 +8,8 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const db = readDb();
-  const emails = db.users
+  const allUsers = await supabaseGetAllUsers();
+  const emails = allUsers
     .filter((u: any) => u.status === 'approved' || u.role === 'admin')
     .map((u: any) => u.email.toLowerCase());
 
@@ -19,5 +19,5 @@ export default async function handler(req: any, res: any) {
     }
   });
 
-  return res.json({ emails });
+  return res.json({ emails: Array.from(new Set(emails)) });
 }

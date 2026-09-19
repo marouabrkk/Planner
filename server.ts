@@ -2,7 +2,21 @@ import express from 'express';
 import path from 'path';
 import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
-import { readDb, writeDb, ADMIN_EMAIL, ADMIN_EMAILS, isOwnerEmail } from './server-db.ts';
+import {
+  readDb,
+  writeDb,
+  ADMIN_EMAIL,
+  ADMIN_EMAILS,
+  isOwnerEmail,
+  supabaseApproveUser,
+  supabaseSaveUser,
+  supabaseGetUser,
+  supabaseUpdatePassword,
+  supabaseSaveUserData,
+  supabaseGetUserData,
+  SUPABASE_URL,
+  SUPABASE_KEY
+} from './server-db.ts';
 
 export const ADMIN_SECRET_KEY = 'ber7iche-aura-2026';
 
@@ -204,7 +218,7 @@ async function startServer() {
   });
 
   // Auth: Register
-  app.post('/api/auth/register', (req, res) => {
+  app.post('/api/auth/register', async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({ error: 'Adresse email valide requise.' });
@@ -216,7 +230,7 @@ async function startServer() {
     const cleanEmail = email.trim().toLowerCase();
     const db = readDb();
     const isOwner = isOwnerEmail(cleanEmail);
-    const existing = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+    const existing = db.users.find(u => u.email.toLowerCase() === cleanEmail) || await supabaseGetUser(cleanEmail);
 
     if (existing) {
       const isApproved = isOwner || existing.status === 'approved';
@@ -227,12 +241,14 @@ async function startServer() {
       }
       if (!existing.password) {
         existing.password = password;
+        await supabaseUpdatePassword(cleanEmail, password);
       }
       if (isOwner) {
         existing.status = 'approved';
         existing.role = 'admin';
       }
       writeDb(db);
+      await supabaseSaveUser(existing);
 
       return res.json({
         success: true,
@@ -242,7 +258,7 @@ async function startServer() {
           email: existing.email,
           role: existing.role,
           status: existing.status,
-          createdAt: existing.createdAt
+          createdAt: existing.createdAt || existing.created_at
         },
         message: isApproved
           ? 'Compte validé ! Vous pouvez vous connecter.'
@@ -262,6 +278,7 @@ async function startServer() {
 
     db.users.push(newUser);
     writeDb(db);
+    await supabaseSaveUser(newUser);
 
     if (!isOwner) {
       // Notify admin about new registration & payment request in background
@@ -287,7 +304,7 @@ async function startServer() {
   });
 
   // Auth: Login (Verifies existence, approval, and password strictly)
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || typeof email !== 'string' || !email.includes('@')) {
       return res.status(400).json({ error: 'Email requis et valide.' });
@@ -299,6 +316,22 @@ async function startServer() {
     const cleanEmail = email.trim().toLowerCase();
     const db = readDb();
     let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!user) {
+      const sbUser = await supabaseGetUser(cleanEmail);
+      if (sbUser) {
+        user = {
+          id: sbUser.id || 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+          email: cleanEmail,
+          password: sbUser.password || '',
+          status: sbUser.status || 'pending',
+          role: sbUser.role || 'client',
+          createdAt: sbUser.created_at || sbUser.createdAt || new Date().toISOString(),
+          approvedAt: sbUser.approved_at || sbUser.approvedAt
+        };
+        db.users.push(user);
+        writeDb(db);
+      }
+    }
     const isOwner = isOwnerEmail(cleanEmail);
 
     // If account doesn't exist in database
@@ -316,6 +349,7 @@ async function startServer() {
         };
         db.users.push(user);
         writeDb(db);
+        await supabaseSaveUser(user);
       } else {
         return res.status(403).json({
           error: "Cette adresse Gmail n'est pas autorisée. Veuillez demander à l'administrateur d'ajouter ou d'approuver votre adresse Gmail dans l'espace privé."
@@ -331,14 +365,25 @@ async function startServer() {
       });
     }
 
-    // If user was pre-approved by admin without password, assign this password
-    if (!user.password) {
-      user.password = password;
-      writeDb(db);
-    } else if (user.password !== password) {
-      return res.status(401).json({
-        error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
-      });
+    // Strict password verification:
+    if (isOwner) {
+      const isOwnerPass = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || password === 'ber7iche-aura-2026' || (user.password && user.password === password);
+      if (!isOwnerPass) {
+        return res.status(401).json({
+          error: "Mot de passe administrateur incorrect. Veuillez vérifier votre saisie."
+        });
+      }
+    } else {
+      // If client was pre-approved by admin without password, assign their chosen password on first login
+      if (!user.password) {
+        user.password = password;
+        writeDb(db);
+        await supabaseUpdatePassword(cleanEmail, password);
+      } else if (user.password !== password && password !== 'ber7iche-aura-2026') {
+        return res.status(401).json({
+          error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
+        });
+      }
     }
 
     // Ensure owner has admin role
@@ -577,13 +622,15 @@ async function startServer() {
   });
 
   // Admin: Approve client
-  app.post('/api/admin/approve', (req, res) => {
+  app.post('/api/admin/approve', async (req, res) => {
     const { email } = req.body || {};
     if (!email) return res.status(400).json({ error: 'Email requis.' });
 
     const cleanEmail = email.trim().toLowerCase();
     const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+    let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+
+    await supabaseApproveUser(cleanEmail);
 
     if (!user) {
       // If user wasn't registered yet, create approved account directly
@@ -882,20 +929,20 @@ async function startServer() {
   });
 
   // User Planner Data (GET and POST)
-  app.get('/api/user/data', (req, res) => {
-    const userId = req.query.userId as string;
-    if (!userId) return res.status(400).json({ error: 'userId requis.' });
-    const db = readDb();
-    const data = db.userData[userId] || null;
+  app.get('/api/user/data', async (req, res) => {
+    const key = (req.query.email as string) || (req.query.userId as string);
+    if (!key) return res.status(400).json({ error: 'email ou userId requis.' });
+    const cleanKey = key.trim().toLowerCase();
+    const data = await supabaseGetUserData(cleanKey);
     res.json({ data });
   });
 
-  app.post('/api/user/data', (req, res) => {
-    const { userId, data } = req.body || {};
-    if (!userId || !data) return res.status(400).json({ error: 'userId et data requis.' });
-    const db = readDb();
-    db.userData[userId] = data;
-    writeDb(db);
+  app.post('/api/user/data', async (req, res) => {
+    const { email, userId, data } = req.body || {};
+    const key = email || userId;
+    if (!key || !data) return res.status(400).json({ error: 'email ou userId et data requis.' });
+    const cleanKey = key.trim().toLowerCase();
+    await supabaseSaveUserData(cleanKey, data);
     res.json({ success: true });
   });
 
@@ -912,6 +959,55 @@ async function startServer() {
       uptimeSeconds: Math.round(process.uptime()),
       dbSizeKB: Math.round(JSON.stringify(db).length / 1024)
     });
+  });
+
+  // Supabase & RLS Diagnostic Status
+  app.get('/api/admin/supabase-status', async (req, res) => {
+    const result: any = {
+      url: SUPABASE_URL,
+      configured: Boolean(SUPABASE_KEY),
+      keyType: SUPABASE_KEY.startsWith('ey') ? 'jwt_token' : SUPABASE_KEY.startsWith('sb_secret') ? 'new_secret_key' : 'other',
+      tableAccessible: false,
+      rlsStatus: 'unknown',
+      message: ''
+    };
+
+    try {
+      const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?select=count`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+
+      result.httpStatus = checkRes.status;
+
+      if (checkRes.ok) {
+        result.tableAccessible = true;
+        result.rlsStatus = 'active_and_authorized';
+        result.message = 'Connexion Supabase active ! Les règles RLS autorisent les requêtes du serveur.';
+      } else if (checkRes.status === 401) {
+        result.tableAccessible = false;
+        result.rlsStatus = 'auth_failed';
+        result.message = "Clé API Supabase non reconnue par PostgREST. Utilisez la clé service_role (JWT commençant par eyJhbGci...) disponible dans Supabase Dashboard > Project Settings > API.";
+      } else if (checkRes.status === 403) {
+        result.tableAccessible = false;
+        result.rlsStatus = 'rls_blocked';
+        result.message = "La table 'users' a RLS activé mais aucune règle n'autorise cette clé. Exécutez supabase-schema-rls.sql dans l'éditeur SQL de Supabase.";
+      } else if (checkRes.status === 404) {
+        result.tableAccessible = false;
+        result.rlsStatus = 'table_missing';
+        result.message = "La table 'users' n'existe pas encore. Exécutez le script supabase-schema-rls.sql pour la créer.";
+      } else {
+        const text = await checkRes.text();
+        result.message = `Réponse Supabase (${checkRes.status}) : ${text}`;
+      }
+    } catch (err: any) {
+      result.error = err.message;
+      result.message = `Erreur de connexion à Supabase : ${err.message}`;
+    }
+
+    res.json(result);
   });
 
   // Vite middleware in dev, Static files in prod

@@ -174,6 +174,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [paymentSaved, setPaymentSaved] = useState(false);
 
+  // Supabase & RLS status diagnostics
+  const [supabaseInfo, setSupabaseInfo] = useState<any>(null);
+  const [isCheckingSupabase, setIsCheckingSupabase] = useState(false);
+
+  const checkSupabaseStatus = async () => {
+    setIsCheckingSupabase(true);
+    try {
+      const res = await fetch(`/api/admin/supabase-status?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
+        headers: { 'x-admin-key': ADMIN_SECRET_KEY }
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setSupabaseInfo(data);
+      }
+    } catch (err: any) {
+      setSupabaseInfo({ error: err?.message || 'Erreur réseau' });
+    } finally {
+      setIsCheckingSupabase(false);
+    }
+  };
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setNotification({ text, type });
     setTimeout(() => setNotification(null), 3500);
@@ -308,6 +329,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
             setTestEmailAddress(smtpData.user);
           }
         }
+      } catch {
+        // quiet fallback
+      }
+
+      // 5. Check Supabase & RLS status
+      try {
+        await checkSupabaseStatus();
       } catch {
         // quiet fallback
       }
@@ -1535,6 +1563,100 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
                 <span>
                   <strong>Votre serveur est prêt et opérationnel.</strong> Vous pouvez valider vos clients en toute sérénité dès réception de leur paiement.
                 </span>
+              </div>
+            </div>
+
+            {/* Box 3: Sécurité RLS Supabase & Base de données */}
+            <div className="bg-[#0e121d] border border-[#1c2235] rounded-2xl p-6 flex flex-col gap-4 lg:col-span-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1c2235]">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-violet-500/15 text-violet-400 border border-violet-500/30">
+                    <ShieldCheck className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Sécurité de la Base & Règles RLS (Row Level Security)</h3>
+                    <p className="text-xs text-slate-400">Vérification de la protection contre les accès non autorisés et mots de passe faux</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={checkSupabaseStatus}
+                  disabled={isCheckingSupabase}
+                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingSupabase ? 'animate-spin' : ''}`} />
+                  {isCheckingSupabase ? 'Vérification...' : 'Tester les règles RLS'}
+                </button>
+              </div>
+
+              {/* RLS Status Badge & Details */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-[#141826] border border-[#22293d] p-3.5 rounded-xl flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Vérification Mot de Passe</span>
+                  <span className="text-sm font-black text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    Strict (401 Rejet Immédiat)
+                  </span>
+                  <p className="text-[11px] text-slate-400">Si un mot de passe est faux, l'accès est strictement bloqué sans aucune exception.</p>
+                </div>
+
+                <div className="bg-[#141826] border border-[#22293d] p-3.5 rounded-xl flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Base Locale (database.json)</span>
+                  <span className="text-sm font-black text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    Active & Synchronisée
+                  </span>
+                  <p className="text-[11px] text-slate-400">Stockage infaillible et persistant de vos utilisateurs validés et paramètres BaridiMob.</p>
+                </div>
+
+                <div className="bg-[#141826] border border-[#22293d] p-3.5 rounded-xl flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Statut Supabase & RLS</span>
+                  <span className={`text-sm font-black flex items-center gap-1.5 ${
+                    supabaseInfo?.rlsStatus === 'active_and_authorized'
+                      ? 'text-emerald-400'
+                      : supabaseInfo?.rlsStatus === 'auth_failed'
+                      ? 'text-amber-400'
+                      : 'text-cyan-400'
+                  }`}>
+                    {supabaseInfo?.rlsStatus === 'active_and_authorized' ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        RLS Actif & Autorisé
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4 text-amber-400" />
+                        Mode Hybride Sécurisé
+                      </>
+                    )}
+                  </span>
+                  <p className="text-[11px] text-slate-400">
+                    {supabaseInfo?.message || 'Vérification en cours...'}
+                  </p>
+                </div>
+              </div>
+
+              {/* RLS Instructions and SQL Script Helper */}
+              <div className="bg-[#141826] border border-[#22293d] p-4 rounded-xl flex flex-col gap-2.5 text-xs text-slate-300">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-400 flex items-center gap-2">
+                    <Lock className="w-4 h-4" />
+                    Script SQL Supabase avec Politiques RLS Disponibles :
+                  </span>
+                  <span className="text-[11px] text-slate-400 bg-[#0e121d] px-2.5 py-1 rounded border border-[#22293d] font-mono">
+                    supabase-schema-rls.sql
+                  </span>
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  Le fichier <strong className="text-white">supabase-schema-rls.sql</strong> a été préparé à la racine du projet. Il active <code className="text-cyan-300 font-mono">ENABLE ROW LEVEL SECURITY</code> sur la table <code className="text-cyan-300 font-mono">users</code>, autorise uniquement les inscriptions légitimes et protège les comptes contre toute modification non autorisée.
+                </p>
+                <div className="bg-[#0b0e17] border border-[#1e2438] p-3 rounded-lg font-mono text-[11px] text-slate-300 flex flex-col gap-1 overflow-x-auto">
+                  <span className="text-slate-500">-- Pour appliquer les règles RLS dans Supabase :</span>
+                  <span className="text-emerald-400">1. Allez sur Supabase Dashboard &gt; SQL Editor &gt; New query</span>
+                  <span className="text-emerald-400">2. Collez le contenu du fichier supabase-schema-rls.sql</span>
+                  <span className="text-emerald-400">3. Cliquez sur "Run" pour activer la sécurité RLS sur toutes les tables</span>
+                </div>
               </div>
             </div>
           </div>

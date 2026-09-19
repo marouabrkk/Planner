@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const rawKey = ((req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey || '').trim().toLowerCase();
+  const rawKey = ((req.headers?.['x-admin-key'] as string) || (req.query?.key as string) || req.body?.adminKey || '').trim().toLowerCase();
   if (!ACCEPTED_KEYS.includes(rawKey)) {
     return res.status(403).json({ error: 'Accès administrateur non autorisé.' });
   }

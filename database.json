@@ -7,7 +7,7 @@
       "role": "admin",
       "createdAt": "2026-09-17T01:10:03.326Z",
       "approvedAt": "2026-09-17T01:10:03.326Z",
-      "password": "Nounoussa7"
+      "password": "xbkw qnjy stzd ibnc"
     },
     {
       "id": "admin_bWFyb3VhMTQ0QGdtYWlsLmNvbQ",
@@ -26,6 +26,24 @@
       "createdAt": "2026-09-17T19:30:10.147Z",
       "approvedAt": "2026-09-17T19:31:27.698Z",
       "password": "maroua2026"
+    },
+    {
+      "id": "u_aXNzeG1obGZAZ21haWwuY29t",
+      "email": "issxmhlf@gmail.com",
+      "status": "approved",
+      "role": "client",
+      "createdAt": "2026-09-19T12:40:09.087Z",
+      "approvedAt": "2026-09-19T13:18:18.361Z",
+      "password": "password123"
+    },
+    {
+      "id": "u_bm91dmVhdV9jbGllbnRAdGVzdC5jb20",
+      "email": "nouveau_client@test.com",
+      "password": "monSuperPassword2026",
+      "status": "approved",
+      "role": "client",
+      "createdAt": "2026-09-19T13:39:00.570Z",
+      "approvedAt": "2026-09-19T13:39:00.714Z"
     }
   ],
   "paymentSettings": {
@@ -33,5 +51,22 @@
     "ccp": "",
     "contact": "@maroua144 (Telegram)"
   },
-  "userData": {}
+  "userData": {
+    "client_a@test.com": {
+      "tasks": [
+        {
+          "id": "1",
+          "title": "Task for A"
+        }
+      ]
+    },
+    "client_b@test.com": {
+      "tasks": [
+        {
+          "id": "2",
+          "title": "Task for B"
+        }
+      ]
+    }
+  }
 }

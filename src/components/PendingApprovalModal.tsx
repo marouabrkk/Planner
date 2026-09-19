@@ -47,6 +47,17 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
     // 2. Poll server every 3s to see if admin approved this account in Admin portal
     const interval = setInterval(async () => {
       try {
+        const clean = userEmail.trim().toLowerCase();
+        // Check local approved list first
+        const localApproved = loadApprovedEmails();
+        if (localApproved.some(e => e.toLowerCase() === clean)) {
+          setIsSuccess(true);
+          triggerCelebration();
+          clearInterval(interval);
+          setTimeout(() => onRefreshCheck(), 500);
+          return;
+        }
+
         const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.includes('application/json')) {
@@ -56,7 +67,7 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
             triggerCelebration();
             clearInterval(interval);
             const current = loadApprovedEmails();
-            saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
+            saveApprovedEmails(Array.from(new Set([...current, clean])));
             setTimeout(() => {
               onRefreshCheck();
             }, 600);
@@ -72,21 +83,43 @@ export const PendingApprovalModal: React.FC<PendingApprovalModalProps> = ({
 
   const handleManualCheck = async () => {
     setIsChecking(true);
-    if (isOwnerEmail(userEmail)) {
-      const current = loadApprovedEmails();
-      saveApprovedEmails(Array.from(new Set([...current, userEmail.toLowerCase()])));
+    const clean = userEmail.trim().toLowerCase();
+
+    // Check local approved or owner
+    const current = loadApprovedEmails();
+    if (isOwnerEmail(clean) || current.some(e => e.toLowerCase() === clean)) {
+      setIsSuccess(true);
+      triggerCelebration();
       onRefreshCheck();
       setIsChecking(false);
       return;
     }
+
     try {
-      const res = await fetch(`/api/auth/status?email=${encodeURIComponent(userEmail)}`);
+      // Check status endpoint
+      const res = await fetch(`/api/auth/status?email=${encodeURIComponent(clean)}`);
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data.approved) {
           setIsSuccess(true);
           triggerCelebration();
+          saveApprovedEmails(Array.from(new Set([...current, clean])));
+          setTimeout(() => {
+            onRefreshCheck();
+          }, 500);
+          return;
+        }
+      }
+
+      // Check global approved emails list
+      const allRes = await fetch('/api/auth/approved-emails');
+      if (allRes.ok) {
+        const allData = await allRes.json();
+        if (allData && Array.isArray(allData.emails) && allData.emails.map((e: string) => e.toLowerCase()).includes(clean)) {
+          setIsSuccess(true);
+          triggerCelebration();
+          saveApprovedEmails(Array.from(new Set([...current, clean])));
           setTimeout(() => {
             onRefreshCheck();
           }, 500);
