@@ -1,4 +1,4 @@
-import { readDb } from '../../server-db.ts';
+import { supabaseGetAllUsers } from '../../server-db.ts';
 
 const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'ber7iche-aura-2026';
 
@@ -12,23 +12,22 @@ export default async function handler(req: any, res: any) {
 
   const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
   if (key !== ADMIN_SECRET_KEY) {
-    return res.status(403).json({ error: 'Accès administrateur non autorisé. Clé secrète requise.' });
+    return res.status(403).json({ error: 'Accès non autorisé.' });
   }
 
-  const db = readDb();
-  const usersSummary = db.users.map((u: any) => ({
-    id: u.id,
-    email: u.email,
-    status: u.status,
-    role: u.role,
-    createdAt: u.createdAt,
-    approvedAt: u.approvedAt
-  }));
+  const users = await supabaseGetAllUsers();
 
   return res.json({
-    users: usersSummary,
-    totalCount: usersSummary.length,
-    pendingCount: usersSummary.filter((u: any) => u.status === 'pending').length,
-    approvedCount: usersSummary.filter((u: any) => u.status === 'approved').length
+    users: users.map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      status: u.status,
+      role: u.role,
+      createdAt: u.created_at,
+      approvedAt: u.approved_at
+    })),
+    totalCount: users.length,
+    pendingCount: users.filter((u: any) => u.status === 'pending').length,
+    approvedCount: users.filter((u: any) => u.status === 'approved').length
   });
 }
