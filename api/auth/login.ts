@@ -1,4 +1,7 @@
-import { readDb, writeDb, isOwnerEmail } from '../../server-db.ts';
+import { isOwnerEmail } from '../../server-db.ts';
+
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tflqmnmdhkxihlywekqs.supabase.co';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -12,69 +15,61 @@ export default async function handler(req: any, res: any) {
   if (!email || typeof email !== 'string' || !email.includes('@')) {
     return res.status(400).json({ error: 'Email requis et valide.' });
   }
-  if (!password || typeof password !== 'string') {
-    return res.status(400).json({ error: 'Mot de passe requis.' });
-  }
 
   const cleanEmail = email.trim().toLowerCase();
-  const db = readDb();
-  let user = db.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
   const isOwner = isOwnerEmail(cleanEmail);
 
-  // If account doesn't exist in database
-  if (!user) {
+  try {
+    // 1. Recherche directe dans la base Supabase
+    let user: any = null;
+    if (SUPABASE_KEY) {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          user = data[0];
+        }
+      }
+    }
+
+    // 2. Si propriétaire (admin)
     if (isOwner) {
-      user = {
-        id: 'admin_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-        email: cleanEmail,
-        password: password,
-        status: 'approved',
-        role: 'admin',
-        createdAt: new Date().toISOString(),
-        approvedAt: new Date().toISOString()
-      };
-      db.users.push(user);
-      writeDb(db);
-    } else {
-      return res.status(403).json({
-        error: "Cette adresse Gmail n'est pas autorisée. Veuillez demander à l'administrateur d'ajouter ou d'approuver votre adresse Gmail dans l'espace privé."
+      return res.json({
+        success: true,
+        approved: true,
+        user: { id: 'admin_owner', email: cleanEmail, role: 'admin', status: 'approved' }
       });
     }
-  }
 
-  // Check approval status
-  const isApproved = isOwner || user.status === 'approved';
-  if (!isApproved) {
-    return res.status(403).json({
-      error: "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
-    });
-  }
-
-  // If user account was created without password, set it now
-  if (!user.password) {
-    user.password = password;
-    writeDb(db);
-  } else if (user.password !== password) {
-    return res.status(401).json({
-      error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
-    });
-  }
-
-  if (isOwner) {
-    user.role = 'admin';
-    user.status = 'approved';
-    writeDb(db);
-  }
-
-  return res.json({
-    success: true,
-    approved: true,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      status: user.status,
-      createdAt: user.createdAt
+    // 3. Si le client n'existe pas encore
+    if (!user) {
+      return res.status(404).json({
+        error: "Aucun compte trouvé avec cet email. Veuillez cliquer sur 'Créer un compte' pour vous inscrire."
+      });
     }
-  });
+
+    // 4. Vérification du statut d'approbation
+    const isApproved = user.status === 'approved';
+
+    // 5. Connexion réussie (Planner si approuvé, écran BaridiMob si en attente)
+    return res.json({
+      success: true,
+      approved: isApproved,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        createdAt: user.created_at
+      }
+    });
+
+  } catch (err: any) {
+    return res.status(500).json({ error: "Erreur serveur de vérification." });
+  }
 }
