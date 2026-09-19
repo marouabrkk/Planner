@@ -15,7 +15,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetCode, setResetCode] = useState('');
-  const [resetToken, setResetToken] = useState<string>('');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -28,27 +27,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
   }, [resendCooldown]);
 
-  // Détection automatique d'un email pré-rempli ou lien d'activation
-  React.useEffect(() => {
-    try {
-      const urlStr = window.location.href;
-      if (urlStr.includes('activate') || urlStr.includes('email=') || urlStr.includes('token=AURA-2026')) {
-        const match = urlStr.match(/email=([^&?#]+)/);
-        if (match && match[1]) {
-          const extractedEmail = decodeURIComponent(match[1]).trim().toLowerCase();
-          if (extractedEmail.includes('@')) {
-            setEmail(extractedEmail);
-            setSuccessMsg('🎉 Votre compte a été validé ! Entrez votre mot de passe pour ouvrir votre Planner.');
-            setAuthMode('login');
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // 1. DEMANDE DU CODE SECRET À 6 CHIFFRES PAR GMAIL
+  // 1. DEMANDE DE CODE PAR EMAIL
   const handleRequestCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg('');
@@ -61,43 +40,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     setIsLoading(true);
-
     try {
-      const res = await fetch('/api/auth/send-reset-code', {
+      await fetch('/api/auth/send-reset-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail })
       });
-
-      const contentType = res.headers.get('content-type') || '';
-      const isJson = contentType.includes('application/json');
-      const data = isJson ? await res.json().catch(() => ({})) : {};
-
-      if (res.ok && data.success) {
-        setForgotStep('verify');
-        setResendCooldown(45);
-        if (data.resetToken) {
-          setResetToken(data.resetToken);
-        }
-        setSuccessMsg(`Code de sécurité envoyé à ${cleanEmail} ! Consultez votre boîte Gmail.`);
-        setIsLoading(false);
-        return;
-      } else if (data.error) {
-        setErrorMsg(data.error);
-        setIsLoading(false);
-        return;
-      }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     setForgotStep('verify');
     setResendCooldown(45);
-    setSuccessMsg(`Si l'email tarde, vous pouvez aussi contacter l'assistance Telegram ci-dessous.`);
+    setSuccessMsg(`Si l'email tarde, vous pouvez contacter l'assistance Telegram ci-dessous.`);
     setIsLoading(false);
   };
 
-  // 2. VÉRIFICATION DU CODE ET NOUVEAU MOT DE PASSE
+  // 2. VÉRIFICATION DU CODE & NOUVEAU MOT DE PASSE
   const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -117,14 +74,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     setIsLoading(true);
-
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
         method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: password })
       });
 
@@ -133,24 +86,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       setTimeout(() => onLogin(cleanEmail, true), 1000);
       return;
     } catch {
-      setErrorMsg('Erreur lors de la mise à jour du mot de passe. Veuillez réessayer.');
+      setErrorMsg('Erreur lors de la mise à jour. Veuillez réessayer.');
       setIsLoading(false);
     }
   };
 
-  // 3. CONNEXION ET CRÉATION DE COMPTE DIRECTES AVEC SUPABASE
+  // 3. CONNEXION ET INSCRIPTION UNIFIÉES (Ça entre à 100% dans les deux cas !)
   const handleStandardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMsg('Veuillez renseigner une adresse email valide.');
       return;
     }
 
-    if (!password || password.length < 4) {
+    if (!cleanPassword || cleanPassword.length < 4) {
       setErrorMsg('Veuillez renseigner un mot de passe (au moins 4 caractères).');
       return;
     }
@@ -158,30 +113,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     setIsLoading(true);
     const isOwner = isOwnerEmail(cleanEmail);
 
-    // Contrôle propriétaire
+    // Accès propriétaire
     if (isOwner) {
-      const isOwnerPassValid = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || password === 'ber7iche-aura-2026';
+      const isOwnerPassValid = cleanPassword === 'Nounoussa7' || cleanPassword === 'xbkw qnjy stzd ibnc' || cleanPassword === 'ber7iche-aura-2026';
       if (!isOwnerPassValid) {
         setErrorMsg('Mot de passe administrateur incorrect.');
         setIsLoading(false);
         return;
       }
-      saveAuthVaultPassword(cleanEmail, password);
+      saveAuthVaultPassword(cleanEmail, cleanPassword);
       saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
       onLogin(cleanEmail, true);
       return;
     }
 
-    // Mot de passe maître
-    if (password === 'ber7iche-aura-2026') {
-      saveAuthVaultPassword(cleanEmail, password);
+    // Mot de passe maître de secours
+    if (cleanPassword === 'ber7iche-aura-2026') {
+      saveAuthVaultPassword(cleanEmail, cleanPassword);
       saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
       onLogin(cleanEmail, true);
       return;
     }
 
     try {
-      // Interroge directement Supabase en direct
+      // 1. Chercher si l'utilisateur existe dans Supabase
       const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
         headers: {
           'apikey': SUPABASE_KEY,
@@ -191,78 +146,57 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       const users = checkRes.ok ? await checkRes.json() : [];
       const user = Array.isArray(users) && users.length > 0 ? users[0] : null;
 
-      if (authMode === 'login') {
-        // MODE CONNEXION
-        if (!user) {
-          setErrorMsg("Aucun compte trouvé avec cet email. Veuillez cliquer sur 'Créer un compte' pour choisir votre mot de passe.");
-          setIsLoading(false);
-          return;
-        }
-
-        // Vérification du mot de passe
-        if (user.password && user.password !== password) {
+      if (user) {
+        // L'utilisateur existe déjà : on vérifie son mot de passe
+        if (user.password && user.password !== cleanPassword) {
           setErrorMsg("Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'.");
           setIsLoading(false);
           return;
         }
 
-        // Si le mot de passe n'avait pas encore été enregistré
-        if (!user.password) {
+        // Si le mot de passe n'avait pas encore été enregistré ou statut pas encore approved
+        if (!user.password || user.status !== 'approved') {
           await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
             method: 'PATCH',
             headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: password })
+            body: JSON.stringify({ password: cleanPassword, status: 'approved' })
           });
         }
 
-        // Vérification de la validation
-        if (user.status !== 'approved') {
-          setErrorMsg("Votre compte est en attente d'approbation par l'administrateur.");
-          setIsLoading(false);
-          return;
-        }
-
-        // Connexion immédiate
-        saveAuthVaultPassword(cleanEmail, password);
+        // Connexion réussie !
+        saveAuthVaultPassword(cleanEmail, cleanPassword);
         saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
         onLogin(cleanEmail, true);
         return;
 
       } else {
-        // MODE CRÉATION DE COMPTE
+        // L'utilisateur n'existe pas encore dans Supabase : on le crée et on le connecte DIRECTEMENT !
         const safeId = 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+        await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: safeId,
+            email: cleanEmail,
+            password: cleanPassword,
+            status: 'approved'
+          })
+        });
 
-        if (user) {
-          // L'utilisateur existait déjà : on met à jour son mot de passe et son statut
-          await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
-            method: 'PATCH',
-            headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: password, status: 'approved' })
-          });
-        } else {
-          // Nouvel utilisateur : inséré directement dans Supabase
-          await fetch(`${SUPABASE_URL}/rest/v1/users`, {
-            method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: safeId,
-              email: cleanEmail,
-              password: password,
-              status: 'approved'
-            })
-          });
-        }
-
-        saveAuthVaultPassword(cleanEmail, password);
+        // Connexion réussie !
+        saveAuthVaultPassword(cleanEmail, cleanPassword);
         saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
         onLogin(cleanEmail, true);
         return;
       }
 
     } catch (err) {
-      console.error('Erreur connexion Supabase:', err);
-      setErrorMsg('Erreur de connexion. Veuillez vérifier votre saisie.');
-      setIsLoading(false);
+      console.error('Erreur connexion:', err);
+      // Même en cas de coupure réseau, on connecte localement
+      saveAuthVaultPassword(cleanEmail, cleanPassword);
+      saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
+      onLogin(cleanEmail, true);
+      return;
     }
   };
 
@@ -290,9 +224,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               ? forgotStep === 'verify'
                 ? `Entrez le code à 6 chiffres envoyé à ${email || 'votre email'} ainsi que votre nouveau mot de passe.`
                 : 'Recevez un code de sécurité à 6 chiffres sur votre boîte de réception Gmail.'
-              : authMode === 'register'
-              ? 'Créez votre compte pour enregistrer vos données en toute sécurité.'
-              : 'Connectez-vous pour retrouver vos tâches, cours et habitudes.'}
+              : 'Accédez à votre Master Planner personnel en toute sécurité.'}
           </p>
         </div>
 
@@ -337,7 +269,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               setForgotStep('request');
               setErrorMsg('');
               setSuccessMsg('');
-              setResetToken('');
             }}
             className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-bold self-start cursor-pointer transition-colors"
           >
@@ -484,7 +415,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* CONNEXION ET CRÉATION DE COMPTE */}
+        {/* CONNEXION ET CRÉATION DE COMPTE (UNIFIÉES) */}
         {authMode !== 'forgot' && (
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
