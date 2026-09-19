@@ -16,6 +16,7 @@ export const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env
 function getSupabaseHeaders(upsert = false) {
   const headers: Record<string, string> = {
     'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
     'Content-Type': 'application/json'
   };
   if (upsert) {
@@ -24,7 +25,7 @@ function getSupabaseHeaders(upsert = false) {
   return headers;
 }
 
-// 2. BASE LOCALE
+// 2. BASE LOCALE (FALLBACK)
 const isVercel = Boolean(process.env.VERCEL);
 const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(process.cwd(), 'database.json');
 
@@ -75,21 +76,22 @@ export async function supabaseGetUser(email: string) {
   return localUser || null;
 }
 
-// 4. SAUVEGARDER UN CLIENT AVEC SON PROPRE MOT DE PASSE
-export async function supabaseSaveUser(user: { id: string; email: string; password?: string; status: string; role: string }) {
+// 4. SAUVEGARDER UN CLIENT DANS LES 4 COLONNES RÉELLES (id, email, password, status)
+export async function supabaseSaveUser(user: { id?: string; email: string; password?: string; status?: string; role?: string }) {
   const cleanEmail = user.email.trim().toLowerCase();
+  const safeId = user.id || 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+  const userPassword = user.password || 'aura2026';
+  const userStatus = user.status || (isOwnerEmail(cleanEmail) ? 'approved' : 'pending');
 
   const db = readDb();
   if (!db.users) db.users = [];
   const existingIdx = db.users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
   const updatedUser = {
-    id: user.id || 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+    id: safeId,
     email: cleanEmail,
-    password: user.password || (existingIdx >= 0 ? db.users[existingIdx].password : ''),
-    status: user.status || 'pending',
-    role: user.role || 'client',
-    createdAt: existingIdx >= 0 && db.users[existingIdx].createdAt ? db.users[existingIdx].createdAt : new Date().toISOString(),
-    approvedAt: user.status === 'approved' ? new Date().toISOString() : (existingIdx >= 0 ? db.users[existingIdx].approvedAt : undefined)
+    password: userPassword,
+    status: userStatus,
+    role: isOwnerEmail(cleanEmail) ? 'admin' : 'client'
   };
 
   if (existingIdx >= 0) {
@@ -100,19 +102,35 @@ export async function supabaseSaveUser(user: { id: string; email: string; passwo
   writeDb(db);
 
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/users`, {
-      method: 'POST',
-      headers: getSupabaseHeaders(true),
-      body: JSON.stringify({
-        id: updatedUser.id,
-        email: cleanEmail,
-        password: updatedUser.password || '',
-        status: updatedUser.status,
-        role: updatedUser.role,
-        created_at: updatedUser.createdAt,
-        approved_at: updatedUser.approvedAt || null
-      })
+    // Vérifier si le client existe déjà dans Supabase
+    const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=id`, {
+      headers: getSupabaseHeaders()
     });
+    const checkData = checkRes.ok ? await checkRes.json() : [];
+
+    if (Array.isArray(checkData) && checkData.length > 0) {
+      // Met à jour seulement password et status (colonnes qui existent)
+      await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+        method: 'PATCH',
+        headers: getSupabaseHeaders(),
+        body: JSON.stringify({
+          password: userPassword,
+          status: userStatus
+        })
+      });
+    } else {
+      // Insère uniquement les 4 colonnes réelles : id, email, password, status
+      await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+        method: 'POST',
+        headers: getSupabaseHeaders(),
+        body: JSON.stringify({
+          id: safeId,
+          email: cleanEmail,
+          password: userPassword,
+          status: userStatus
+        })
+      });
+    }
   } catch (err) {
     console.error('Erreur sauvegarde Supabase:', err);
   }
@@ -123,6 +141,7 @@ export async function supabaseSaveUser(user: { id: string; email: string; passwo
 // 5. VALIDER UN CLIENT DANS SUPABASE (FONCTIONNE À TOUS LES COUPS)
 export async function supabaseApproveUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
+  const safeId = 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
 
   // A. Mise à jour locale
   const db = readDb();
@@ -130,46 +149,46 @@ export async function supabaseApproveUser(email: string) {
   const existing = db.users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
   if (existing) {
     existing.status = 'approved';
-    existing.approvedAt = new Date().toISOString();
   } else {
     db.users.push({
-      id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+      id: safeId,
       email: cleanEmail,
+      password: 'password123',
       status: 'approved',
-      role: isOwnerEmail(cleanEmail) ? 'admin' : 'client',
-      createdAt: new Date().toISOString(),
-      approvedAt: new Date().toISOString()
+      role: isOwnerEmail(cleanEmail) ? 'admin' : 'client'
     });
   }
   writeDb(db);
 
-  // B. Mise à jour dans Supabase avec PATCH
+  // B. Enregistrement direct dans Supabase
   try {
-    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
-      method: 'PATCH',
-      headers: getSupabaseHeaders(),
-      body: JSON.stringify({
-        status: 'approved',
-        approved_at: new Date().toISOString()
-      })
+    // Vérifier si l'utilisateur existe déjà
+    const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=id`, {
+      headers: getSupabaseHeaders()
     });
+    const checkData = checkRes.ok ? await checkRes.json() : [];
 
-    if (patchRes.ok) {
-      const data = await patchRes.json().catch(() => []);
-      if (!Array.isArray(data) || data.length === 0) {
-        await fetch(`${SUPABASE_URL}/rest/v1/users`, {
-          method: 'POST',
-          headers: getSupabaseHeaders(true),
-          body: JSON.stringify({
-            id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-            email: cleanEmail,
-            password: existing?.password || 'aura2026',
-            status: 'approved',
-            role: isOwnerEmail(cleanEmail) ? 'admin' : 'client',
-            approved_at: new Date().toISOString()
-          })
-        });
-      }
+    if (Array.isArray(checkData) && checkData.length > 0) {
+      // Existe déjà -> on le passe en approved
+      await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+        method: 'PATCH',
+        headers: getSupabaseHeaders(),
+        body: JSON.stringify({
+          status: 'approved'
+        })
+      });
+    } else {
+      // N'existe pas encore -> on l'insère directement dans les 4 colonnes
+      await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+        method: 'POST',
+        headers: getSupabaseHeaders(),
+        body: JSON.stringify({
+          id: safeId,
+          email: cleanEmail,
+          password: existing?.password || 'password123',
+          status: 'approved'
+        })
+      });
     }
   } catch (err) {
     console.error('Erreur approbation Supabase:', err);
@@ -187,7 +206,7 @@ export async function supabaseGetAllUsers() {
   });
 
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/users?select=*&order=created_at.desc`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/users?select=*`, {
       headers: getSupabaseHeaders()
     });
     if (res.ok) {
@@ -244,8 +263,7 @@ export async function supabaseSaveUserData(email: string, userData: any) {
       headers: getSupabaseHeaders(true),
       body: JSON.stringify({
         email: cleanEmail,
-        data: userData,
-        updated_at: new Date().toISOString()
+        data: userData
       })
     });
   } catch (err) {
