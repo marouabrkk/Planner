@@ -530,10 +530,16 @@ async function startServer() {
     res.json({ emails });
   });
 
+  const ACCEPTED_ADMIN_KEYS = ['ber7iche-aura-2026', 'nounoussa7', 'ber7iche', 'ber7iche2026', 'aura-2026'];
+  const isValidServerAdminKey = (k?: string) => {
+    if (!k) return false;
+    return ACCEPTED_ADMIN_KEYS.includes(k.trim().toLowerCase());
+  };
+
   // Admin key verification
   app.post('/api/admin/verify-key', (req, res) => {
     const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
-    if (key === ADMIN_SECRET_KEY) {
+    if (isValidServerAdminKey(key)) {
       return res.json({ valid: true });
     }
     return res.status(403).json({ valid: false, error: 'Clé secrète administrateur invalide.' });
@@ -545,7 +551,7 @@ async function startServer() {
       return next();
     }
     const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
-    if (key === ADMIN_SECRET_KEY) {
+    if (isValidServerAdminKey(key)) {
       return next();
     }
     return res.status(403).json({ error: 'Accès administrateur non autorisé. Clé secrète requise.' });

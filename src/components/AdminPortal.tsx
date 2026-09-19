@@ -24,7 +24,9 @@ import {
   Send,
   HelpCircle,
   Sparkles,
-  Link2
+  Link2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -33,10 +35,26 @@ import {
   loadApprovedEmails,
   saveApprovedEmails,
   loadPaymentSettings,
-  savePaymentSettings
+  savePaymentSettings,
+  loadPendingRegistrations,
+  markRegistrationApprovedLocally
 } from '../utils/storage';
 
 export const ADMIN_SECRET_KEY = 'ber7iche-aura-2026';
+export const ACCEPTED_ADMIN_KEYS = [
+  'ber7iche-aura-2026',
+  'nounoussa7',
+  'ber7iche',
+  'ber7iche2026',
+  'aura-2026',
+  'aura2026'
+];
+
+export const isValidAdminKey = (key: string | null | undefined): boolean => {
+  if (!key) return false;
+  const clean = key.trim().toLowerCase();
+  return ACCEPTED_ADMIN_KEYS.includes(clean);
+};
 
 interface ClientUser {
   id: string;
@@ -74,7 +92,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
       const href = window.location.href;
       const url = new URL(href);
       const queryKey = url.searchParams.get('key') || url.searchParams.get('adminKey') || url.searchParams.get('token');
-      if (queryKey && queryKey.trim() === ADMIN_SECRET_KEY) {
+      if (isValidAdminKey(queryKey)) {
         localStorage.setItem('aura_admin_token', ADMIN_SECRET_KEY);
         return true;
       }
@@ -83,20 +101,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
       const hash = window.location.hash || '';
       if (hash.includes('key=')) {
         const match = hash.match(/key=([^&?#]+)/);
-        if (match && decodeURIComponent(match[1]).trim() === ADMIN_SECRET_KEY) {
+        if (match && isValidAdminKey(decodeURIComponent(match[1]))) {
           localStorage.setItem('aura_admin_token', ADMIN_SECRET_KEY);
           return true;
         }
       }
 
-      // If URL contains the secret key directly in hash
-      if (hash.includes(ADMIN_SECRET_KEY)) {
+      // If URL contains any valid key in hash
+      if (ACCEPTED_ADMIN_KEYS.some(k => hash.toLowerCase().includes(k))) {
         localStorage.setItem('aura_admin_token', ADMIN_SECRET_KEY);
         return true;
       }
 
       const stored = localStorage.getItem('aura_admin_token');
-      return stored === ADMIN_SECRET_KEY;
+      return isValidAdminKey(stored);
     } catch {
       return false;
     }
@@ -104,6 +122,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
 
   const [isAuthorized, setIsAuthorized] = useState<boolean>(checkInitialAuthorization);
   const [passcode, setPasscode] = useState('');
+  const [showPasscode, setShowPasscode] = useState(false);
   const [authError, setAuthError] = useState('');
 
   // Auto-listen to hash/url updates to immediately authorize if key passed
@@ -162,14 +181,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
 
   const handleUnlockWithKey = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = passcode.trim();
-    if (clean === ADMIN_SECRET_KEY) {
+    if (isValidAdminKey(passcode)) {
       localStorage.setItem('aura_admin_token', ADMIN_SECRET_KEY);
       setIsAuthorized(true);
       setAuthError('');
       showToast('Console déverrouillée avec succès !');
     } else {
-      setAuthError('Clé secrète incorrecte. Accès refusé.');
+      setAuthError('Clé incorrecte. Vous pouvez entrer "ber7iche-aura-2026" ou votre mot de passe "Nounoussa7".');
     }
   };
 
@@ -184,45 +202,66 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
     if (!isAuthorized) return;
     setIsLoading(true);
     try {
-      // 1. Fetch Users from Server (with LocalStorage fallback)
+      // 1. Fetch Users from Server & Merge with Local Registrations so NO pending user is ever missed
       try {
-        const usersRes = await fetch(`/api/admin/users?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
-          headers: { 'x-admin-key': ADMIN_SECRET_KEY }
+        let serverUsers: ClientUser[] = [];
+        try {
+          const usersRes = await fetch(`/api/admin/users?key=${encodeURIComponent(ADMIN_SECRET_KEY)}`, {
+            headers: { 'x-admin-key': ADMIN_SECRET_KEY }
+          });
+          if (usersRes.ok) {
+            const data = await usersRes.json().catch(() => ({}));
+            if (Array.isArray(data.users)) {
+              serverUsers = data.users;
+            }
+          }
+        } catch {
+          // Server fetch failed, continue with local users
+        }
+
+        const userMap = new Map<string, ClientUser>();
+
+        // 1. Add server users
+        serverUsers.forEach(u => {
+          userMap.set(u.email.toLowerCase(), u);
         });
-        if (usersRes.ok) {
-          const data = await usersRes.json().catch(() => ({}));
-          if (Array.isArray(data.users) && data.users.length > 0) {
-            setUsers(data.users);
+
+        // 2. Add local pending registrations
+        const localPending = loadPendingRegistrations();
+        localPending.forEach(p => {
+          const email = p.email.toLowerCase();
+          if (!userMap.has(email)) {
+            userMap.set(email, {
+              id: 'u_' + btoa(email).replace(/=/g, ''),
+              email: p.email,
+              status: p.status || 'pending',
+              role: ADMIN_EMAILS.includes(email) ? 'admin' : 'client',
+              createdAt: p.createdAt || new Date().toISOString()
+            });
+          }
+        });
+
+        // 3. Add & enforce local approved emails
+        const localApproved = loadApprovedEmails();
+        localApproved.forEach(em => {
+          const email = em.toLowerCase();
+          const existing = userMap.get(email);
+          if (existing) {
+            existing.status = 'approved';
           } else {
-            // Populate fallback users
-            const localApproved = loadApprovedEmails();
-            setUsers(localApproved.map(em => ({
-              id: 'u_' + btoa(em.toLowerCase()).replace(/=/g, ''),
+            userMap.set(email, {
+              id: 'u_' + btoa(email).replace(/=/g, ''),
               email: em,
               status: 'approved',
-              role: ADMIN_EMAILS.includes(em.toLowerCase()) ? 'admin' : 'client',
+              role: ADMIN_EMAILS.includes(email) ? 'admin' : 'client',
               createdAt: new Date().toISOString()
-            })));
+            });
           }
-        } else {
-          const localApproved = loadApprovedEmails();
-          setUsers(localApproved.map(em => ({
-            id: 'u_' + btoa(em.toLowerCase()).replace(/=/g, ''),
-            email: em,
-            status: 'approved',
-            role: ADMIN_EMAILS.includes(em.toLowerCase()) ? 'admin' : 'client',
-            createdAt: new Date().toISOString()
-          })));
-        }
-      } catch {
-        const localApproved = loadApprovedEmails();
-        setUsers(localApproved.map(em => ({
-          id: 'u_' + btoa(em.toLowerCase()).replace(/=/g, ''),
-          email: em,
-          status: 'approved',
-          role: ADMIN_EMAILS.includes(em.toLowerCase()) ? 'admin' : 'client',
-          createdAt: new Date().toISOString()
-        })));
+        });
+
+        setUsers(Array.from(userMap.values()));
+      } catch (err) {
+        console.error('Failed to sync admin users:', err);
       }
 
       // 2. Fetch Payment
@@ -295,6 +334,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
     if (!currentApproved.some(e => e.toLowerCase() === clean)) {
       saveApprovedEmails([...currentApproved, clean]);
     }
+    markRegistrationApprovedLocally(clean);
 
     const directLink = `${window.location.origin}/#activate?token=AURA-2026&email=${encodeURIComponent(clean)}`;
     try {
@@ -603,16 +643,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
-                  type="password"
+                  type={showPasscode ? 'text' : 'password'}
                   value={passcode}
                   onChange={(e) => {
                     setPasscode(e.target.value);
                     setAuthError('');
                   }}
-                  placeholder="Saisissez votre clé secrète..."
-                  className="w-full bg-[#171c2c] border border-[#262f48] focus:border-amber-500 rounded-xl pl-10 pr-4 py-3 text-sm text-white focus:outline-none transition-all placeholder:text-slate-600"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  placeholder="ber7iche-aura-2026 ou Nounoussa7"
+                  className="w-full bg-[#171c2c] border border-[#262f48] focus:border-amber-500 rounded-xl pl-10 pr-12 py-3 text-sm text-white focus:outline-none transition-all placeholder:text-slate-600"
                   autoFocus
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPasscode(!showPasscode)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  title={showPasscode ? 'Masquer' : 'Afficher'}
+                >
+                  {showPasscode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               {authError && (
                 <p className="text-xs text-red-400 font-medium mt-2 flex items-center gap-1">
@@ -621,13 +672,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onGoToPlanner }) => {
                 </p>
               )}
 
-              <div className="flex justify-end mt-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
                 <button
                   type="button"
-                  onClick={() => setPasscode(ADMIN_SECRET_KEY)}
-                  className="text-[11px] text-amber-400/80 hover:text-amber-300 underline cursor-pointer"
+                  onClick={() => {
+                    setPasscode('ber7iche-aura-2026');
+                    setAuthError('');
+                  }}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
                 >
-                  Insérer ma clé propriétaire par défaut
+                  Remplir « ber7iche-aura-2026 »
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasscode('Nounoussa7');
+                    setAuthError('');
+                  }}
+                  className="text-[11px] text-sky-400 hover:text-sky-300 underline cursor-pointer"
+                >
+                  Remplir « Nounoussa7 »
                 </button>
               </div>
             </div>
