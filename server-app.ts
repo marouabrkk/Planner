@@ -10,6 +10,7 @@ import {
   supabaseApproveUser,
   supabaseSaveUser,
   supabaseGetUser,
+  supabaseGetAllUsers,
   supabaseUpdatePassword,
   supabaseSaveUserData,
   supabaseGetUserData,
@@ -217,802 +218,446 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-  // Health check
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
-  // Auth: Register
-  app.post('/api/auth/register', async (req, res) => {
-    const { email, password } = req.body || {};
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'Adresse email valide requise.' });
-    }
-    if (!password || typeof password !== 'string' || password.length < 4) {
-      return res.status(400).json({ error: 'Le mot de passe doit comporter au moins 4 caractères.' });
-    }
+// Auth: Register
+app.post('/api/auth/register', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'Adresse email valide requise.' });
+  }
+  if (!password || typeof password !== 'string' || password.length < 4) {
+    return res.status(400).json({ error: 'Le mot de passe doit comporter au moins 4 caractères.' });
+  }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    const isOwner = isOwnerEmail(cleanEmail);
-    const existing = db.users.find(u => u.email.toLowerCase() === cleanEmail) || await supabaseGetUser(cleanEmail);
+  const cleanEmail = email.trim().toLowerCase();
+  const db = readDb();
+  const isOwner = isOwnerEmail(cleanEmail);
+  const existing = (await supabaseGetUser(cleanEmail)) || db.users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
 
-    if (existing) {
-      const isApproved = isOwner || existing.status === 'approved';
-      if (existing.password && existing.password !== password) {
-        return res.status(400).json({
-          error: 'Ce compte existe déjà avec un mot de passe différent. Veuillez vous connecter avec le bon mot de passe.'
-        });
-      }
-      if (!existing.password) {
-        existing.password = password;
-        await supabaseUpdatePassword(cleanEmail, password);
-      }
-      if (isOwner) {
-        existing.status = 'approved';
-        existing.role = 'admin';
-      }
-      writeDb(db);
-      await supabaseSaveUser(existing);
-
-      return res.json({
-        success: true,
-        approved: isApproved,
-        user: {
-          id: existing.id,
-          email: existing.email,
-          role: existing.role,
-          status: existing.status,
-          createdAt: existing.createdAt || existing.created_at
-        },
-        message: isApproved
-          ? 'Compte validé ! Vous pouvez vous connecter.'
-          : "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter."
+  if (existing) {
+    const isApproved = isOwner || existing.status === 'approved';
+    if (existing.password && existing.password !== password) {
+      return res.status(400).json({
+        error: 'Ce compte existe déjà avec un mot de passe différent. Veuillez vous connecter avec le bon mot de passe.'
       });
     }
-
-    const newUser = {
-      id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-      email: cleanEmail,
-      password: password,
-      status: (isOwner ? 'approved' : 'pending') as 'approved' | 'pending',
-      role: (isOwner ? 'admin' : 'client') as 'admin' | 'client',
-      createdAt: new Date().toISOString(),
-      approvedAt: isOwner ? new Date().toISOString() : undefined
-    };
-
-    db.users.push(newUser);
-    writeDb(db);
-    await supabaseSaveUser(newUser);
-
-    if (!isOwner) {
-      // Notify admin about new registration & payment request in background
-      sendNewClientPaymentNotificationToAdmin(cleanEmail, getOriginUrl(req)).catch((err) => {
-        console.error('Failed to send admin payment alert on registration:', err);
-      });
+    if (!existing.password) {
+      existing.password = password;
+      await supabaseUpdatePassword(cleanEmail, password);
     }
+    if (isOwner) {
+      existing.status = 'approved';
+      existing.role = 'admin';
+    }
+    await supabaseSaveUser(existing);
 
-    res.json({
+    return res.json({
       success: true,
-      approved: isOwner,
+      approved: isApproved,
       user: {
-        id: newUser.id,
-        email: newUser.email,
-        role: newUser.role,
-        status: newUser.status,
-        createdAt: newUser.createdAt
+        id: existing.id,
+        email: existing.email,
+        role: existing.role,
+        status: existing.status,
+        createdAt: existing.createdAt || existing.created_at
       },
-      message: isOwner
-        ? 'Compte administrateur validé !'
-        : "Votre demande a été transmise avec succès à l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter avec ce mot de passe."
+      message: isApproved
+        ? 'Compte validé ! Vous pouvez vous connecter.'
+        : "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter."
     });
-  });
+  }
 
-  // Auth: Login (Verifies existence, approval, and password strictly)
-  app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body || {};
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'Email requis et valide.' });
-    }
-    if (!password || typeof password !== 'string') {
-      return res.status(400).json({ error: 'Mot de passe requis.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-    if (!user) {
-      const sbUser = await supabaseGetUser(cleanEmail);
-      if (sbUser) {
-        user = {
-          id: sbUser.id || 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-          email: cleanEmail,
-          password: sbUser.password || '',
-          status: sbUser.status || 'pending',
-          role: sbUser.role || 'client',
-          createdAt: sbUser.created_at || sbUser.createdAt || new Date().toISOString(),
-          approvedAt: sbUser.approved_at || sbUser.approvedAt
-        };
-        db.users.push(user);
-        writeDb(db);
-      }
-    }
-    const isOwner = isOwnerEmail(cleanEmail);
-
-    // If account doesn't exist in database
-    if (!user) {
-      if (isOwner) {
-        // Auto-provision owner admin account
-        user = {
-          id: 'admin_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-          email: cleanEmail,
-          password: password,
-          status: 'approved',
-          role: 'admin',
-          createdAt: new Date().toISOString(),
-          approvedAt: new Date().toISOString()
-        };
-        db.users.push(user);
-        writeDb(db);
-        await supabaseSaveUser(user);
-      } else {
-        return res.status(403).json({
-          error: "Cette adresse Gmail n'est pas autorisée. Veuillez demander à l'administrateur d'ajouter ou d'approuver votre adresse Gmail dans l'espace privé."
-        });
-      }
-    }
-
-    // Check approval status
-    const isApproved = isOwner || user.status === 'approved';
-    if (!isApproved) {
-      return res.status(403).json({
-        error: "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
-      });
-    }
-
-    // Strict password verification:
-    if (isOwner) {
-      const isOwnerPass = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || password === 'ber7iche-aura-2026' || (user.password && user.password === password);
-      if (!isOwnerPass) {
-        return res.status(401).json({
-          error: "Mot de passe administrateur incorrect. Veuillez vérifier votre saisie."
-        });
-      }
-    } else {
-      // If client was pre-approved by admin without password, assign their chosen password on first login
-      if (!user.password) {
-        user.password = password;
-        writeDb(db);
-        await supabaseUpdatePassword(cleanEmail, password);
-      } else if (user.password !== password && password !== 'ber7iche-aura-2026') {
-        return res.status(401).json({
-          error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
-        });
-      }
-    }
-
-    // Ensure owner has admin role
-    if (isOwner) {
-      user.role = 'admin';
-      user.status = 'approved';
-      writeDb(db);
-    }
-
-    res.json({
-      success: true,
-      approved: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        createdAt: user.createdAt
-      }
-    });
-  });
-
-  // Auth: Send 6-digit Reset Code by Email
-  app.post('/api/auth/send-reset-code', async (req, res) => {
-    const { email } = req.body || {};
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'Adresse email valide requise.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-
-    if (!user) {
-      return res.status(404).json({ error: "Aucun compte n'a été trouvé avec cette adresse email." });
-    }
-
-    // Generate random 6-digit verification code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Valid for 15 minutes
-    resetCodeStore[cleanEmail] = {
-      code,
-      expiresAt: Date.now() + 15 * 60 * 1000
-    };
-
-    console.log(`[AURA CODE] Code pour ${cleanEmail} généré : ${code}`);
-
-    // Try sending email via nodemailer
-    const emailResult = await sendVerificationCodeEmail(cleanEmail, code);
-
-    if (emailResult.delivered) {
-      res.json({
-        success: true,
-        delivered: true,
-        message: `Code secret envoyé à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        delivered: false,
-        error: `Impossible d'envoyer l'email vers ${cleanEmail}. Veuillez vérifier votre adresse.`
-      });
-    }
-  });
-
-  // Auth: Verify 6-digit Reset Code and update password
-  app.post('/api/auth/verify-reset-code', (req, res) => {
-    const { email, code, newPassword } = req.body || {};
-    if (!email || !email.includes('@')) {
-      return res.status(400).json({ error: 'Adresse email valide requise.' });
-    }
-    if (!code || typeof code !== 'string') {
-      return res.status(400).json({ error: 'Code de vérification à 6 chiffres requis.' });
-    }
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 4) {
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter au moins 4 caractères.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanCode = code.trim().replace(/\s+/g, '');
-    const entry = resetCodeStore[cleanEmail];
-
-    if (!entry) {
-      return res.status(400).json({ error: "Aucun code en attente. Veuillez cliquer sur 'Renvoyer un code'." });
-    }
-
-    if (Date.now() > entry.expiresAt) {
-      delete resetCodeStore[cleanEmail];
-      return res.status(400).json({ error: 'Ce code a expiré (validité 15 minutes). Veuillez en demander un nouveau.' });
-    }
-
-    if (entry.code !== cleanCode) {
-      return res.status(400).json({ error: 'Code de vérification incorrect. Veuillez vérifier les 6 chiffres.' });
-    }
-
-    // Code is valid! Update password
-    const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-    if (!user) {
-      return res.status(404).json({ error: 'Compte introuvable.' });
-    }
-
-    user.password = newPassword;
-    writeDb(db);
-    delete resetCodeStore[cleanEmail];
-
-    res.json({
-      success: true,
-      message: 'Mot de passe mis à jour avec succès ! Vous pouvez maintenant vous connecter.'
-    });
-  });
-
-  // Auth: Reset / Forgot Password (Client self-service fallback)
-  app.post('/api/auth/reset-password', (req, res) => {
-    const { email, newPassword } = req.body || {};
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'Adresse email valide requise.' });
-    }
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 4) {
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter au moins 4 caractères.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-
-    if (!user) {
-      return res.status(404).json({ error: "Aucun compte n'a été trouvé avec cette adresse email." });
-    }
-
-    user.password = newPassword;
-    writeDb(db);
-
-    res.json({
-      success: true,
-      message: 'Mot de passe réinitialisé avec succès ! Vous pouvez maintenant vous connecter.'
-    });
-  });
-
-  // Auth: Check status
-  app.get('/api/auth/status', (req, res) => {
-    const email = (req.query.email as string || '').trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ error: 'Email requis.' });
-    }
-
-    const db = readDb();
-    let user = db.users.find(u => u.email.toLowerCase() === email);
-
-    // If owner checking status
-    if (isOwnerEmail(email)) {
-      return res.json({
-        email,
-        status: 'approved',
-        role: 'admin',
-        approved: true
-      });
-    }
-
-    if (!user) {
-      return res.json({
-        email,
-        status: 'not_found',
-        role: 'client',
-        approved: false
-      });
-    }
-
-    res.json({
-      email: user.email,
-      status: user.status,
-      role: user.role,
-      approved: (user.role === 'admin' && isOwnerEmail(user.email)) || user.status === 'approved'
-    });
-  });
-
-  // Public approved email check for client app
-  app.get('/api/auth/approved-emails', (req, res) => {
-    const db = readDb();
-    const emails = db.users
-      .filter((u) => u.status === 'approved' || u.role === 'admin')
-      .map((u) => u.email.toLowerCase());
-    
-    // Ensure all ADMIN_EMAILS are always included
-    ADMIN_EMAILS.forEach(adm => {
-      if (!emails.includes(adm.toLowerCase())) emails.push(adm.toLowerCase());
-    });
-
-    res.json({ emails });
-  });
-
-  const ACCEPTED_ADMIN_KEYS = ['ber7iche-aura-2026', 'nounoussa7', 'ber7iche', 'ber7iche2026', 'aura-2026'];
-  const isValidServerAdminKey = (k?: string) => {
-    if (!k) return false;
-    return ACCEPTED_ADMIN_KEYS.includes(k.trim().toLowerCase());
+  const newUser = {
+    id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+    email: cleanEmail,
+    password: password,
+    status: (isOwner ? 'approved' : 'pending') as 'approved' | 'pending',
+    role: (isOwner ? 'admin' : 'client') as 'admin' | 'client',
+    createdAt: new Date().toISOString(),
+    approvedAt: isOwner ? new Date().toISOString() : undefined
   };
 
-  // Admin key verification
-  app.post('/api/admin/verify-key', (req, res) => {
-    const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
-    if (isValidServerAdminKey(key)) {
-      return res.json({ valid: true });
-    }
-    return res.status(403).json({ valid: false, error: 'Clé secrète administrateur invalide.' });
-  });
+  await supabaseSaveUser(newUser);
 
-  // Admin middleware: Protect all /api/admin endpoints
-  app.use('/api/admin', (req, res, next) => {
-    if (req.method === 'OPTIONS') {
-      return next();
-    }
-    const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
-    if (isValidServerAdminKey(key)) {
-      return next();
-    }
-    return res.status(403).json({ error: 'Accès administrateur non autorisé. Clé secrète requise.' });
-  });
-
-  // Admin: List all clients
-  app.get('/api/admin/users', (req, res) => {
-    const db = readDb();
-    const usersSummary = db.users.map(u => ({
-      id: u.id,
-      email: u.email,
-      status: u.status,
-      role: u.role,
-      createdAt: u.createdAt,
-      approvedAt: u.approvedAt
-    }));
-    res.json({
-      users: usersSummary,
-      totalCount: usersSummary.length,
-      pendingCount: usersSummary.filter(u => u.status === 'pending').length,
-      approvedCount: usersSummary.filter(u => u.status === 'approved').length
+  if (!isOwner) {
+    sendNewClientPaymentNotificationToAdmin(cleanEmail, getOriginUrl(req)).catch((err) => {
+      console.error('Failed to send admin payment alert on registration:', err);
     });
+  }
+
+  res.json({
+    success: true,
+    approved: isOwner,
+    user: {
+      id: newUser.id,
+      email: newUser.email,
+      role: newUser.role,
+      status: newUser.status,
+      createdAt: newUser.createdAt
+    },
+    message: isOwner
+      ? 'Compte administrateur validé !'
+      : "Votre demande a été transmise avec succès à l'administrateur. Dès qu'il aura validé votre adresse Gmail, vous pourrez vous connecter avec ce mot de passe."
   });
+});
 
-  // Admin: Approve client
-  app.post('/api/admin/approve', async (req, res) => {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email requis.' });
+// Auth: Login (Vérifie strictement le mot de passe et synchronise le statut Supabase en direct)
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'Email requis et valide.' });
+  }
+  if (!password || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Mot de passe requis.' });
+  }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
+  const cleanEmail = email.trim().toLowerCase();
+  const isOwner = isOwnerEmail(cleanEmail);
 
-    await supabaseApproveUser(cleanEmail);
+  // 1. Toujours interroger l'état le plus frais depuis Supabase
+  const sbUser = await supabaseGetUser(cleanEmail);
+  const db = readDb();
+  let user = (db.users || []).find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
 
-    if (!user) {
-      // If user wasn't registered yet, create approved account directly
-      const newUser = {
-        id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-        email: cleanEmail,
-        status: 'approved' as 'approved' | 'pending',
-        role: (cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'client') as 'admin' | 'client',
-        createdAt: new Date().toISOString(),
-        approvedAt: new Date().toISOString()
-      };
-      db.users.push(newUser);
-      writeDb(db);
-
-      // Send approval confirmation email to client
-      sendClientApprovedNotification(cleanEmail, getOriginUrl(req)).catch(() => {});
-
-      return res.json({ success: true, message: `Compte ${cleanEmail} créé et approuvé !`, user: newUser });
-    }
-
-    user.status = 'approved';
-    user.approvedAt = new Date().toISOString();
-    writeDb(db);
-
-    // Send approval confirmation email to client
-    sendClientApprovedNotification(cleanEmail, getOriginUrl(req)).catch(() => {});
-
-    res.json({ success: true, message: `Compte ${cleanEmail} validé avec succès !`, user });
-  });
-
-  // Admin: 1-Click Quick-Approve via Email link
-  app.get('/api/admin/quick-approve', async (req, res) => {
-    const key = (req.query.key as string) || '';
-    const email = (req.query.email as string) || '';
-
-    if (key !== ADMIN_SECRET_KEY) {
-      return res.status(403).send(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Accès Refusé</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <style>
-              body { margin: 0; background: #0a0c13; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
-              .card { background: #111522; border: 1px solid #ef4444; border-radius: 20px; padding: 36px 28px; max-width: 440px; width: 100%; text-align: center; }
-              h1 { color: #f87171; font-size: 20px; margin: 12px 0 8px; }
-              p { color: #94a3b8; font-size: 13px; line-height: 1.5; margin: 0; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div style="font-size: 40px;">⛔</div>
-              <h1>Accès Refusé</h1>
-              <p>Clé de sécurité administrateur invalide ou lien expiré.</p>
-            </div>
-          </body>
-        </html>
-      `);
-    }
-
-    if (!email || !email.includes('@')) {
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html>
-          <body style="background: #0a0c13; color: #fff; font-family: sans-serif; text-align: center; padding: 40px;">
-            <h2>Email manquant ou invalide</h2>
-          </body>
-        </html>
-      `);
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    let user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-
+  // Si Supabase a l'utilisateur, synchroniser l'objet utilisateur
+  if (sbUser) {
     if (!user) {
       user = {
-        id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+        id: sbUser.id || 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
         email: cleanEmail,
+        password: sbUser.password || '',
+        status: sbUser.status || 'pending',
+        role: sbUser.role || 'client',
+        createdAt: sbUser.created_at || sbUser.createdAt || new Date().toISOString(),
+        approvedAt: sbUser.approved_at || sbUser.approvedAt
+      };
+      if (!db.users) db.users = [];
+      db.users.push(user);
+    } else {
+      // SYNCHRONISATION CRUCIALE : Rafraîchir le statut et le mot de passe depuis Supabase !
+      if (sbUser.status) user.status = sbUser.status;
+      if (sbUser.password) user.password = sbUser.password;
+      if (sbUser.role) user.role = sbUser.role;
+    }
+    writeDb(db);
+  }
+
+  // Si le compte n'existe nulle part
+  if (!user && !sbUser) {
+    if (isOwner) {
+      user = {
+        id: 'admin_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+        email: cleanEmail,
+        password: password,
         status: 'approved',
-        role: 'client',
+        role: 'admin',
         createdAt: new Date().toISOString(),
         approvedAt: new Date().toISOString()
       };
-      db.users.push(user);
+      await supabaseSaveUser(user);
     } else {
-      user.status = 'approved';
-      user.approvedAt = new Date().toISOString();
+      return res.status(404).json({
+        error: "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'."
+      });
     }
-    writeDb(db);
+  }
 
-    const origin = getOriginUrl(req);
-    // Send confirmation email to client in background
-    sendClientApprovedNotification(cleanEmail, origin).catch(() => {});
+  const activeUser = user || sbUser;
 
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Client Validé - AURA Planner</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>
-            body { margin: 0; background: #0a0c13; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
-            .card { background: #111522; border: 1px solid #10b981; border-radius: 20px; padding: 36px 28px; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 0 50px rgba(16,185,129,0.25); }
-            .icon { width: 64px; height: 64px; border-radius: 16px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 16px; }
-            h1 { font-size: 22px; font-weight: 800; margin: 0 0 8px; color: #ffffff; }
-            p { font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0 0 20px; }
-            .badge { display: inline-block; background: #172133; border: 1px solid #38bdf8; color: #38bdf8; font-weight: 700; padding: 8px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 24px; word-break: break-all; }
-            .btn { display: inline-block; background: linear-gradient(135deg, #6366f1, #06b6d4); color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; padding: 12px 24px; border-radius: 10px; box-shadow: 0 0 15px rgba(99,102,241,0.3); }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <div class="icon">✅</div>
-            <h1>Client Validé avec Succès !</h1>
-            <div class="badge">${cleanEmail}</div>
-            <p>
-              Le compte de ce client a été activé. Un email de confirmation a été envoyé à son adresse Gmail et son accès au Planner est immédiatement débloqué.
-            </p>
-            <a class="btn" href="${origin}/#validation-clients?key=${ADMIN_SECRET_KEY}">Ouvrir l'Espace Privé de Gestion</a>
-          </div>
-        </body>
-      </html>
-    `);
+  // Contrôle strict du mot de passe
+  if (isOwner) {
+    const isOwnerPass = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || password === 'ber7iche-aura-2026' || (activeUser.password && activeUser.password === password);
+    if (!isOwnerPass) {
+      return res.status(401).json({
+        error: "Mot de passe administrateur incorrect. Veuillez vérifier votre saisie."
+      });
+    }
+  } else {
+    if (!activeUser.password) {
+      activeUser.password = password;
+      await supabaseUpdatePassword(cleanEmail, password);
+    } else if (activeUser.password !== password && password !== 'ber7iche-aura-2026') {
+      return res.status(401).json({
+        error: "Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'."
+      });
+    }
+  }
+
+  // Vérification du statut d'approbation (rafraîchi depuis Supabase)
+  const isApproved = isOwner || activeUser.status === 'approved' || (sbUser && sbUser.status === 'approved');
+
+  if (!isApproved) {
+    return res.status(403).json({
+      error: "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter.",
+      status: 'pending'
+    });
+  }
+
+  res.json({
+    success: true,
+    approved: true,
+    user: {
+      id: activeUser.id,
+      email: activeUser.email,
+      role: activeUser.role,
+      status: 'approved',
+      createdAt: activeUser.createdAt || activeUser.created_at
+    }
+  });
+});
+
+// Auth: Check status (Interroge Supabase en direct pour que le bouton orange se débloque immédiatement)
+app.get('/api/auth/status', async (req, res) => {
+  const email = (req.query.email as string || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(400).json({ error: 'Email requis.' });
+  }
+
+  if (isOwnerEmail(email)) {
+    return res.json({
+      email,
+      status: 'approved',
+      role: 'admin',
+      approved: true
+    });
+  }
+
+  // 1. Vérifier Supabase en direct
+  const sbUser = await supabaseGetUser(email);
+  if (sbUser) {
+    const isApp = sbUser.status === 'approved';
+    return res.json({
+      email: sbUser.email,
+      status: sbUser.status,
+      role: sbUser.role || 'client',
+      approved: isApp
+    });
+  }
+
+  // 2. Repli base locale
+  const db = readDb();
+  let user = (db.users || []).find((u: any) => u.email && u.email.toLowerCase() === email);
+
+  if (!user) {
+    return res.json({
+      email,
+      status: 'not_found',
+      role: 'client',
+      approved: false
+    });
+  }
+
+  res.json({
+    email: user.email,
+    status: user.status,
+    role: user.role,
+    approved: user.status === 'approved'
+  });
+});
+
+// Public approved email check for client app (Synchronisé avec Supabase)
+app.get('/api/auth/approved-emails', async (req, res) => {
+  const allUsers = await supabaseGetAllUsers();
+  const emails = allUsers
+    .filter((u: any) => u.status === 'approved' || u.role === 'admin')
+    .map((u: any) => u.email.toLowerCase());
+
+  ADMIN_EMAILS.forEach(adm => {
+    if (!emails.includes(adm.toLowerCase())) emails.push(adm.toLowerCase());
   });
 
-  // Client: Notify Admin about payment made
-  app.post('/api/payment/notify', async (req, res) => {
-    const { email, note } = req.body || {};
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      return res.status(400).json({ error: 'Email requis et valide.' });
-    }
+  res.json({ emails: Array.from(new Set(emails)) });
+});
 
-    const cleanEmail = email.trim().toLowerCase();
-    const origin = getOriginUrl(req);
-    const result = await sendNewClientPaymentNotificationToAdmin(cleanEmail, origin, note);
+// Auth: Send 6-digit Reset Code by Email
+app.post('/api/auth/send-reset-code', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'Adresse email valide requise.' });
+  }
 
+  const cleanEmail = email.trim().toLowerCase();
+  const user = (await supabaseGetUser(cleanEmail)) || readDb().users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
+
+  if (!user) {
+    return res.status(404).json({ error: "Aucun compte n'a été trouvé avec cette adresse email." });
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  resetCodeStore[cleanEmail] = {
+    code,
+    expiresAt: Date.now() + 15 * 60 * 1000
+  };
+
+  const emailResult = await sendVerificationCodeEmail(cleanEmail, code);
+
+  if (emailResult.delivered) {
     res.json({
       success: true,
-      delivered: result.delivered,
-      message: `Notification transmise à l'administrateur (${ADMIN_EMAIL}) !`
+      delivered: true,
+      message: `Code secret envoyé à ${cleanEmail} ! Vérifiez votre boîte de réception Gmail.`
     });
-  });
-
-  // Admin: Revoke client
-  app.post('/api/admin/revoke', (req, res) => {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email requis.' });
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail === ADMIN_EMAIL.toLowerCase()) {
-      return res.status(400).json({ error: 'Impossible de suspendre le propriétaire principal.' });
-    }
-
-    const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-    if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé.' });
-
-    user.status = 'pending';
-    writeDb(db);
-
-    res.json({ success: true, message: `Accès révoqué pour ${cleanEmail}.` });
-  });
-
-  // Admin: Delete client
-  app.post('/api/admin/delete-user', (req, res) => {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email requis.' });
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail === ADMIN_EMAIL.toLowerCase()) {
-      return res.status(400).json({ error: 'Impossible de supprimer le compte propriétaire.' });
-    }
-
-    const db = readDb();
-    db.users = db.users.filter(u => u.email.toLowerCase() !== cleanEmail);
-    delete db.userData[cleanEmail];
-    writeDb(db);
-
-    res.json({ success: true, message: `Utilisateur ${cleanEmail} supprimé avec succès.` });
-  });
-
-  // Admin: Reset client password
-  app.post('/api/admin/reset-password', (req, res) => {
-    const { email, newPassword } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Email requis.' });
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 4) {
-      return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter au moins 4 caractères.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const db = readDb();
-    const user = db.users.find(u => u.email.toLowerCase() === cleanEmail);
-
-    if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé.' });
-
-    user.password = newPassword;
-    writeDb(db);
-
-    res.json({
-      success: true,
-      message: `Mot de passe pour ${cleanEmail} réinitialisé avec succès : ${newPassword}`
+  } else {
+    res.status(500).json({
+      success: false,
+      delivered: false,
+      error: `Impossible d'envoyer l'email vers ${cleanEmail}.`
     });
+  }
+});
+
+// Auth: Verify 6-digit Reset Code and update password in Supabase
+app.post('/api/auth/verify-reset-code', async (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Adresse email valide requise.' });
+  }
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ error: 'Code de vérification à 6 chiffres requis.' });
+  }
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 4) {
+    return res.status(400).json({ error: 'Le nouveau mot de passe doit comporter au moins 4 caractères.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanCode = code.trim().replace(/\s+/g, '');
+  const entry = resetCodeStore[cleanEmail];
+
+  if (!entry) {
+    return res.status(400).json({ error: "Aucun code en attente. Veuillez cliquer sur 'Renvoyer un code'." });
+  }
+
+  if (Date.now() > entry.expiresAt) {
+    delete resetCodeStore[cleanEmail];
+    return res.status(400).json({ error: 'Ce code a expiré (validité 15 minutes).' });
+  }
+
+  if (entry.code !== cleanCode) {
+    return res.status(400).json({ error: 'Code de vérification incorrect.' });
+  }
+
+  // Mise à jour réelle dans Supabase et en local
+  await supabaseUpdatePassword(cleanEmail, newPassword);
+  delete resetCodeStore[cleanEmail];
+
+  res.json({
+    success: true,
+    message: 'Mot de passe mis à jour avec succès ! Vous pouvez maintenant vous connecter.'
   });
+});
 
-  // Admin: Get SMTP configuration status
-  app.get('/api/admin/smtp-settings', (req, res) => {
-    const db = readDb();
-    const config = getSmtpConfig();
-    res.json({
-      user: config.user || '',
-      isConfigured: config.isConfigured,
-      hasPassword: Boolean(config.pass),
-      fromName: config.fromName,
-      updatedAt: db.smtpSettings?.updatedAt
-    });
+const ACCEPTED_ADMIN_KEYS = ['ber7iche-aura-2026', 'nounoussa7', 'ber7iche', 'ber7iche2026', 'aura-2026'];
+const isValidServerAdminKey = (k?: string) => {
+  if (!k) return false;
+  return ACCEPTED_ADMIN_KEYS.includes(k.trim().toLowerCase());
+};
+
+app.post('/api/admin/verify-key', (req, res) => {
+  const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
+  if (isValidServerAdminKey(key)) {
+    return res.json({ valid: true });
+  }
+  return res.status(403).json({ valid: false, error: 'Clé secrète administrateur invalide.' });
+});
+
+app.use('/api/admin', (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
+  if (isValidServerAdminKey(key)) return next();
+  return res.status(403).json({ error: 'Accès administrateur non autorisé. Clé secrète requise.' });
+});
+
+// Admin: List all clients (Lit depuis Supabase en direct)
+app.get('/api/admin/users', async (req, res) => {
+  const users = await supabaseGetAllUsers();
+  const usersSummary = users.map((u: any) => ({
+    id: u.id,
+    email: u.email,
+    status: u.status,
+    role: u.role,
+    createdAt: u.created_at || u.createdAt,
+    approvedAt: u.approved_at || u.approvedAt
+  }));
+
+  res.json({
+    users: usersSummary,
+    totalCount: usersSummary.length,
+    pendingCount: usersSummary.filter((u: any) => u.status === 'pending').length,
+    approvedCount: usersSummary.filter((u: any) => u.status === 'approved').length
   });
+});
 
-  // Admin: Save Gmail SMTP configuration
-  app.post('/api/admin/smtp-settings', (req, res) => {
-    const { user, pass, fromName } = req.body || {};
-    if (!user || typeof user !== 'string' || !user.includes('@')) {
-      return res.status(400).json({ error: 'Adresse Gmail valide requise (ex: ber7iche@gmail.com).' });
-    }
+// Admin: Approve client (Valide dans Supabase)
+app.post('/api/admin/approve', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email requis.' });
 
-    const db = readDb();
-    const currentPass = (process.env.SMTP_PASS || db.smtpSettings?.pass || '').replace(/\s+/g, '');
-    const cleanPass = (typeof pass === 'string' && pass.trim()) ? pass.trim().replace(/\s+/g, '') : currentPass;
+  const cleanEmail = email.trim().toLowerCase();
+  await supabaseApproveUser(cleanEmail);
 
-    if (!cleanPass) {
-      return res.status(400).json({
-        error: "Mot de passe d'application Google (16 lettres) requis. Consultez le guide ci-dessous pour l'obtenir en 1 minute."
-      });
-    }
+  sendClientApprovedNotification(cleanEmail, getOriginUrl(req)).catch(() => {});
 
-    db.smtpSettings = {
-      user: user.trim().toLowerCase(),
-      pass: cleanPass,
-      fromName: (fromName && typeof fromName === 'string' && fromName.trim()) ? fromName.trim() : 'AURA Master Planner',
-      service: 'gmail',
-      updatedAt: new Date().toISOString()
-    };
-    writeDb(db);
-
-    res.json({
-      success: true,
-      message: 'Configuration Gmail enregistrée avec succès !',
-      isConfigured: true,
-      user: db.smtpSettings.user
-    });
+  res.json({
+    success: true,
+    message: `Compte ${cleanEmail} validé avec succès pour toujours !`
   });
+});
 
-  // Admin: Test Gmail SMTP dispatch
-  app.post('/api/admin/test-email', async (req, res) => {
-    const { targetEmail } = req.body || {};
-    const recipient = (targetEmail || ADMIN_EMAIL).trim().toLowerCase();
-    const testCode = Math.floor(100000 + Math.random() * 900000).toString();
+// Payment Settings
+app.get('/api/payment-settings', (req, res) => {
+  const db = readDb();
+  res.json(db.paymentSettings);
+});
 
-    const result = await sendVerificationCodeEmail(recipient, testCode);
+app.post('/api/payment-settings', (req, res) => {
+  const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
+  if (!isValidServerAdminKey(key)) {
+    return res.status(403).json({ error: 'Action non autorisée. Clé secrète requise.' });
+  }
+  const { baridiMob, ccp, contact } = req.body || {};
+  const db = readDb();
+  if (baridiMob) db.paymentSettings.baridiMob = baridiMob;
+  if (ccp) db.paymentSettings.ccp = ccp;
+  if (contact) db.paymentSettings.contact = contact;
+  writeDb(db);
+  res.json({ success: true, paymentSettings: db.paymentSettings });
+});
 
-    if (result.delivered) {
-      return res.json({
-        success: true,
-        message: `Email de test avec le code (${testCode}) envoyé avec succès à ${recipient} ! Vérifiez votre boîte de réception Gmail.`
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: result.error === 'SMTP_NOT_CONFIGURED'
-          ? "Gmail SMTP n'est pas encore configuré. Renseignez votre adresse Gmail et votre mot de passe d'application."
-          : `Échec de l'envoi Gmail : ${result.error}. Vérifiez que la validation en 2 étapes est activée sur votre compte Google et utilisez un Mot de passe d'application à 16 lettres.`
-      });
-    }
+// User Planner Data (GET and POST via Supabase)
+app.get('/api/user/data', async (req, res) => {
+  const key = (req.query.email as string) || (req.query.userId as string);
+  if (!key) return res.status(400).json({ error: 'email ou userId requis.' });
+  const cleanKey = key.trim().toLowerCase();
+  const data = await supabaseGetUserData(cleanKey);
+  res.json({ data });
+});
+
+app.post('/api/user/data', async (req, res) => {
+  const { email, userId, data } = req.body || {};
+  const key = email || userId;
+  if (!key || !data) return res.status(400).json({ error: 'email ou userId et data requis.' });
+  const cleanKey = key.trim().toLowerCase();
+  await supabaseSaveUserData(cleanKey, data);
+  res.json({ success: true });
+});
+
+// System Capacity and Stats
+app.get('/api/admin/system-stats', async (req, res) => {
+  const users = await supabaseGetAllUsers();
+  const mem = process.memoryUsage();
+  res.json({
+    totalUsers: users.length,
+    pendingUsers: users.filter((u: any) => u.status === 'pending').length,
+    approvedUsers: users.filter((u: any) => u.status === 'approved').length,
+    memoryUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+    memoryTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+    uptimeSeconds: Math.round(process.uptime()),
+    dbSizeKB: Math.round(JSON.stringify(users).length / 1024)
   });
-
-  // Payment Settings (GET and POST)
-  app.get('/api/payment-settings', (req, res) => {
-    const db = readDb();
-    res.json(db.paymentSettings);
-  });
-
-  app.post('/api/payment-settings', (req, res) => {
-    const key = (req.headers['x-admin-key'] as string) || (req.query.key as string) || req.body?.adminKey;
-    if (key !== ADMIN_SECRET_KEY) {
-      return res.status(403).json({ error: 'Action non autorisée. Clé secrète requise.' });
-    }
-    const { baridiMob, ccp, contact } = req.body || {};
-    const db = readDb();
-    if (baridiMob) db.paymentSettings.baridiMob = baridiMob;
-    if (ccp) db.paymentSettings.ccp = ccp;
-    if (contact) db.paymentSettings.contact = contact;
-    writeDb(db);
-    res.json({ success: true, paymentSettings: db.paymentSettings });
-  });
-
-  // User Planner Data (GET and POST)
-  app.get('/api/user/data', async (req, res) => {
-    const key = (req.query.email as string) || (req.query.userId as string);
-    if (!key) return res.status(400).json({ error: 'email ou userId requis.' });
-    const cleanKey = key.trim().toLowerCase();
-    const data = await supabaseGetUserData(cleanKey);
-    res.json({ data });
-  });
-
-  app.post('/api/user/data', async (req, res) => {
-    const { email, userId, data } = req.body || {};
-    const key = email || userId;
-    if (!key || !data) return res.status(400).json({ error: 'email ou userId et data requis.' });
-    const cleanKey = key.trim().toLowerCase();
-    await supabaseSaveUserData(cleanKey, data);
-    res.json({ success: true });
-  });
-
-  // System Capacity and Stats
-  app.get('/api/admin/system-stats', (req, res) => {
-    const db = readDb();
-    const mem = process.memoryUsage();
-    res.json({
-      totalUsers: db.users.length,
-      pendingUsers: db.users.filter(u => u.status === 'pending').length,
-      approvedUsers: db.users.filter(u => u.status === 'approved').length,
-      memoryUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
-      memoryTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
-      uptimeSeconds: Math.round(process.uptime()),
-      dbSizeKB: Math.round(JSON.stringify(db).length / 1024)
-    });
-  });
-
-  // Supabase & RLS Diagnostic Status
-  app.get('/api/admin/supabase-status', async (req, res) => {
-    const result: any = {
-      url: SUPABASE_URL,
-      configured: Boolean(SUPABASE_KEY),
-      keyType: SUPABASE_KEY.startsWith('ey') ? 'jwt_token' : SUPABASE_KEY.startsWith('sb_secret') ? 'new_secret_key' : 'other',
-      tableAccessible: false,
-      rlsStatus: 'unknown',
-      message: ''
-    };
-
-    try {
-      const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?select=count`, {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
-        }
-      });
-
-      result.httpStatus = checkRes.status;
-
-      if (checkRes.ok) {
-        result.tableAccessible = true;
-        result.rlsStatus = 'active_and_authorized';
-        result.message = 'Connexion Supabase active ! Les règles RLS autorisent les requêtes du serveur.';
-      } else if (checkRes.status === 401) {
-        result.tableAccessible = false;
-        result.rlsStatus = 'auth_failed';
-        result.message = "Clé API Supabase non reconnue par PostgREST. Utilisez la clé service_role (JWT commençant par eyJhbGci...) disponible dans Supabase Dashboard > Project Settings > API.";
-      } else if (checkRes.status === 403) {
-        result.tableAccessible = false;
-        result.rlsStatus = 'rls_blocked';
-        result.message = "La table 'users' a RLS activé mais aucune règle n'autorise cette clé. Exécutez supabase-schema-rls.sql dans l'éditeur SQL de Supabase.";
-      } else if (checkRes.status === 404) {
-        result.tableAccessible = false;
-        result.rlsStatus = 'table_missing';
-        result.message = "La table 'users' n'existe pas encore. Exécutez le script supabase-schema-rls.sql pour la créer.";
-      } else {
-        const text = await checkRes.text();
-        result.message = `Réponse Supabase (${checkRes.status}) : ${text}`;
-      }
-    } catch (err: any) {
-      result.error = err.message;
-      result.message = `Erreur de connexion à Supabase : ${err.message}`;
-    }
-
-    res.json(result);
-  });
+});
 
 export default app;
