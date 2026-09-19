@@ -1,6 +1,23 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, ArrowLeft, Send, RefreshCw, ExternalLink, KeyRound } from 'lucide-react';
-import { getAuthVault, saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
+import {
+  Mail,
+  Lock,
+  ShieldAlert,
+  ArrowRight,
+  CheckCircle2,
+  ArrowLeft,
+  Send,
+  RefreshCw,
+  ExternalLink,
+  KeyRound
+} from 'lucide-react';
+import {
+  getAuthVault,
+  saveAuthVaultPassword,
+  isOwnerEmail,
+  loadApprovedEmails,
+  saveApprovedEmails
+} from '../utils/storage';
 
 interface AuthModalProps {
   onLogin: (email: string, isApprovedDirectly?: boolean) => void;
@@ -46,14 +63,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         body: JSON.stringify({ email: cleanEmail })
       });
 
-      const contentType = res.headers.get('content-type') || '';
-      const data = contentType.includes('application/json') ? await res.json().catch(() => ({})) : {};
-
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         setForgotStep('verify');
         setResendCooldown(45);
         if (data.resetToken) setResetToken(data.resetToken);
-        setSuccessMsg(`Code de sécurité à 6 chiffres envoyé à ${cleanEmail} ! Consultez votre boîte Gmail.`);
+        setSuccessMsg(`Code de sécurité envoyé à ${cleanEmail} !`);
         setIsLoading(false);
         return;
       } else if (data.error) {
@@ -64,11 +79,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     } catch {}
 
     setForgotStep('verify');
-    setSuccessMsg(`Si ce compte existe, un code de sécurité a été envoyé à ${cleanEmail}.`);
+    setSuccessMsg(`Un code de sécurité a été envoyé à ${cleanEmail}.`);
     setIsLoading(false);
   };
 
-  // ================= 2. VALIDATION DU CODE ET SAUVEGARDE DU NOUVEAU MOT DE PASSE =================
+  // ================= 2. VALIDATION CODE & NOUVEAU MOT DE PASSE =================
   const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -78,7 +93,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     const cleanCode = resetCode.trim().replace(/\s+/g, '');
 
     if (!cleanCode || cleanCode.length !== 6) {
-      setErrorMsg('Veuillez entrer le code à 6 chiffres reçu dans votre boîte Gmail.');
+      setErrorMsg('Veuillez entrer le code à 6 chiffres reçu dans Gmail.');
       return;
     }
 
@@ -101,18 +116,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         })
       });
 
-      const contentType = res.headers.get('content-type') || '';
-      const data = contentType.includes('application/json') ? await res.json().catch(() => ({})) : {};
-
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        // Sauvegarde locale ET serveur confirmée
         saveAuthVaultPassword(cleanEmail, password);
-        setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion...');
+        setSuccessMsg('Mot de passe mis à jour ! Connexion en cours...');
         setTimeout(() => {
           const approvedList = loadApprovedEmails();
-          const isApproved = isOwnerEmail(cleanEmail) || approvedList.some(e => e.toLowerCase() === cleanEmail);
+          const isApproved = isOwnerEmail(cleanEmail) || approvedList.includes(cleanEmail);
           onLogin(cleanEmail, isApproved);
-        }, 1000);
+        }, 800);
         return;
       } else if (data.error) {
         setErrorMsg(data.error);
@@ -122,15 +134,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     } catch {}
 
     saveAuthVaultPassword(cleanEmail, password);
-    setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion...');
+    setSuccessMsg('Mot de passe mis à jour ! Connexion en cours...');
     setTimeout(() => {
       const approvedList = loadApprovedEmails();
-      const isApproved = isOwnerEmail(cleanEmail) || approvedList.some(e => e.toLowerCase() === cleanEmail);
+      const isApproved = isOwnerEmail(cleanEmail) || approvedList.includes(cleanEmail);
       onLogin(cleanEmail, isApproved);
-    }, 1000);
+    }, 800);
   };
 
-  // ================= 3. CONNEXION STRICTE & INSCRIPTION =================
+  // ================= 3. CONNEXION ET INSCRIPTION STRICTES =================
   const handleStandardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -153,7 +165,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     const vault = getAuthVault();
     const savedPassword = vault[cleanEmail];
 
-    // --- A. CRÉATION DE COMPTE (NOUVEAU CLIENT) ---
+    // CRÉER UN COMPTE
     if (authMode === 'register') {
       saveAuthVaultPassword(cleanEmail, password);
 
@@ -166,12 +178,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       } catch {}
 
       setIsLoading(false);
-      // Direction immédiate vers BaridiMob pour effectuer le paiement
       onLogin(cleanEmail, false);
       return;
     }
 
-    // --- B. CONNEXION STRICTE ---
+    // SE CONNECTER
     if (authMode === 'login') {
       // 1. Administrateurs
       if (isOwner) {
@@ -185,7 +196,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
 
-      // 2. Vérification auprès du serveur
+      // 2. Vérification serveur
       let serverChecked = false;
       try {
         const res = await fetch('/api/auth/login', {
@@ -194,56 +205,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           body: JSON.stringify({ email: cleanEmail, password })
         });
 
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json().catch(() => ({}));
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
           serverChecked = true;
-
-          // FAUX MOT DE PASSE REJETÉ IMMÉDIATEMENT PAR LE SERVEUR
-          if (res.status === 401) {
-            setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
-            setIsLoading(false);
-            return;
-          }
-
-          if (res.status === 404) {
-            setErrorMsg("Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'.");
-            setIsLoading(false);
-            return;
-          }
-
-          if (res.ok) {
-            saveAuthVaultPassword(cleanEmail, password);
-            setIsLoading(false);
-            onLogin(cleanEmail, Boolean(data.approved));
-            return;
-          }
+          saveAuthVaultPassword(cleanEmail, password);
+          setIsLoading(false);
+          onLogin(cleanEmail, Boolean(data.approved));
+          return;
+        } else if (res.status === 401) {
+          setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
+          setIsLoading(false);
+          return;
         }
       } catch {}
 
-      // 3. Contrôle de sécurité local strict (si coupure réseau)
+      // 3. Vérification locale stricte (si coupure réseau)
       if (!serverChecked) {
         if (!savedPassword && !isMasterKey) {
-          setErrorMsg("Aucun compte trouvé avec cette adresse email. Veuillez cliquer sur 'Créer un compte'.");
+          setErrorMsg("Aucun compte trouvé avec cet email. Veuillez cliquer sur 'Créer un compte'.");
           setIsLoading(false);
           return;
         }
 
-        // FAUX MOT DE PASSE : BLOCAGE STRICT
+        // FAUX MOT DE PASSE REJETÉ IMMÉDIATEMENT
         if (savedPassword && savedPassword !== password && !isMasterKey) {
           setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
           setIsLoading(false);
           return;
         }
+
+        // VRAI MOT DE PASSE VALIDÉ
+        const approvedList = loadApprovedEmails();
+        const isApproved = isMasterKey || approvedList.includes(cleanEmail);
+        setIsLoading(false);
+        onLogin(cleanEmail, isApproved);
+        return;
       }
-
-      // Si le mot de passe est 100% correct :
-      saveAuthVaultPassword(cleanEmail, password);
-      const approvedList = loadApprovedEmails();
-      const isApproved = isMasterKey || approvedList.some((e) => e.toLowerCase() === cleanEmail);
-
-      setIsLoading(false);
-      onLogin(cleanEmail, isApproved);
     }
   };
 
@@ -261,10 +258,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </h2>
           <p className="text-xs text-slate-400 max-w-xs">
             {authMode === 'forgot'
-              ? 'Recevez un code de sécurité à 6 chiffres sur votre boîte Gmail pour réinitialiser votre accès.'
-              : authMode === 'register'
-              ? 'Inscrivez-vous avec votre mot de passe pour accéder au Planner et à BaridiMob.'
-              : 'Connectez-vous avec votre adresse email et votre mot de passe.'}
+              ? 'Recevez un code à 6 chiffres sur votre boîte Gmail pour réinitialiser votre accès.'
+              : authMode === 'register' ? 'Inscrivez-vous avec votre mot de passe pour accéder à BaridiMob.' : 'Connectez-vous avec votre adresse email et votre mot de passe.'}
           </p>
         </div>
 
@@ -300,7 +295,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </button>
         )}
 
-        {/* ================= ÉTAPE 1 : DEMANDE CODE GMAIL ================= */}
+        {/* ÉTAPE 1 : ENVOI CODE GMAIL */}
         {authMode === 'forgot' && forgotStep === 'request' && (
           <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -343,7 +338,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* ================= ÉTAPE 2 : VÉRIFICATION CODE GMAIL & NOUVEAU MOT DE PASSE ================= */}
+        {/* ÉTAPE 2 : VÉRIFICATION CODE GMAIL */}
         {authMode === 'forgot' && forgotStep === 'verify' && (
           <form onSubmit={handleVerifyCodeAndReset} className="flex flex-col gap-3.5">
             <div className="flex items-center justify-between bg-[#171c2c] border border-[#22293d] px-3 py-2 rounded-xl text-xs">
@@ -423,7 +418,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* ================= FORMULAIRE DE CONNEXION / INSCRIPTION ================= */}
+        {/* FORMULAIRE CONNEXION / INSCRIPTION */}
         {authMode !== 'forgot' && (
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -484,12 +479,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* Support Telegram de secours */}
+        {/* Telegram support */}
         {authMode === 'forgot' && (
           <div className="bg-[#171c2c] border border-[#22293d] p-3 rounded-xl flex flex-col gap-1.5">
             <span className="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              Une difficulté pour réinitialiser ?
+              Difficulté pour réinitialiser ?
             </span>
             <a
               href="https://t.me/maroua144"
@@ -499,3 +494,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
             >
               <Send className="w-3.5 h-3.5" />
               <span>Contacter le support Telegram (@maroua144)</span>
+            </a>
+          </div>
+        )}
+
+        <div className="border-t border-[#22293d] pt-3 flex items-center justify-center text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>AURA Master Planner • Connexion 100% sécurisée</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
