@@ -9,17 +9,38 @@ export function isOwnerEmail(email: string): boolean {
   return ADMIN_EMAILS.includes(email.trim().toLowerCase());
 }
 
-// CONNEXION SUPABASE AVEC REPLI AUTOMATIQUE LOCAL
+// CONNEXION SUPABASE OFFICIELLE
 export const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tflqmnmdhkxihlywekqs.supabase.co';
 export const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_secret_rN0ms_ZMSU-L0OXTE4mAUQ_sBMnhAa9';
 
-// Système de stockage local & temporaire
+// Headers PostgREST corrects (Ne JAMAIS envoyer de Bearer token avec une clé opaque sb_secret_)
+function getSupabaseHeaders(upsert = false) {
+  const headers: Record<string, string> = {
+    'apikey': SUPABASE_KEY,
+    'Content-Type': 'application/json'
+  };
+  if (upsert) {
+    headers['Prefer'] = 'resolution=merge-duplicates';
+  }
+  return headers;
+}
+
+// Système de stockage local
 const isVercel = Boolean(process.env.VERCEL);
 const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(process.cwd(), 'database.json');
 
 export function readDb(): any {
   try {
-    if (fs.existsSync(DB_FILE)) {
+    if (!fs.existsSync(DB_FILE)) {
+      const rootDb = path.join(process.cwd(), 'database.json');
+      if (fs.existsSync(rootDb)) {
+        const rootContent = fs.readFileSync(rootDb, 'utf-8');
+        try {
+          fs.writeFileSync(DB_FILE, rootContent, 'utf-8');
+          return JSON.parse(rootContent);
+        } catch {}
+      }
+    } else {
       return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
     }
   } catch {}
@@ -32,17 +53,13 @@ export function writeDb(data: any): void {
   } catch {}
 }
 
-// Récupérer un utilisateur (Supabase avec repli local instantané)
+// Récupérer un utilisateur dans Supabase
 export async function supabaseGetUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Tenter Supabase
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers: getSupabaseHeaders()
     });
     if (res.ok) {
       const data = await res.json();
@@ -54,17 +71,16 @@ export async function supabaseGetUser(email: string) {
     console.error('Erreur lecture Supabase:', err);
   }
 
-  // 2. Repli local fiable
+  // Repli local
   const db = readDb();
   const localUser = (db.users || []).find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
   return localUser || null;
 }
 
-// Créer ou enregistrer un client (Sauvegardé à la fois localement et dans Supabase)
+// Sauvegarder ou mettre à jour un client dans Supabase (UPSERT garanti)
 export async function supabaseSaveUser(user: { id: string; email: string; password?: string; status: string; role: string }) {
   const cleanEmail = user.email.trim().toLowerCase();
 
-  // 1. Sauvegarder dans la base locale toujours
   const db = readDb();
   if (!db.users) db.users = [];
   const existingIdx = db.users.findIndex((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
@@ -85,23 +101,18 @@ export async function supabaseSaveUser(user: { id: string; email: string; passwo
   }
   writeDb(db);
 
-  // 2. Tenter sauvegarde Supabase
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/users`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
+      headers: getSupabaseHeaders(true),
       body: JSON.stringify({
         id: updatedUser.id,
         email: cleanEmail,
         password: updatedUser.password || '',
         status: updatedUser.status,
         role: updatedUser.role,
-        created_at: updatedUser.createdAt
+        created_at: updatedUser.createdAt,
+        approved_at: updatedUser.approvedAt || null
       })
     });
   } catch (err) {
@@ -111,11 +122,10 @@ export async function supabaseSaveUser(user: { id: string; email: string; passwo
   return updatedUser;
 }
 
-// Valider un client (Localement + Supabase)
+// VALIDER UN CLIENT DANS SUPABASE (UPSERT : insère si absent, met à jour en approved si présent)
 export async function supabaseApproveUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Mettre à jour immédiatement dans la base locale
   const db = readDb();
   if (!db.users) db.users = [];
   const existing = db.users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
@@ -134,17 +144,15 @@ export async function supabaseApproveUser(email: string) {
   }
   writeDb(db);
 
-  // 2. Tenter mise à jour Supabase
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
-      method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json'
-      },
+    await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+      method: 'POST',
+      headers: getSupabaseHeaders(true),
       body: JSON.stringify({
+        id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+        email: cleanEmail,
         status: 'approved',
+        role: isOwnerEmail(cleanEmail) ? 'admin' : 'client',
         approved_at: new Date().toISOString()
       })
     });
@@ -153,7 +161,7 @@ export async function supabaseApproveUser(email: string) {
   }
 }
 
-// Récupérer tous les utilisateurs (Fusionne base locale + Supabase)
+// Récupérer tous les utilisateurs
 export async function supabaseGetAllUsers() {
   const db = readDb();
   const localUsers: any[] = db.users || [];
@@ -165,10 +173,7 @@ export async function supabaseGetAllUsers() {
 
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/users?select=*&order=created_at.desc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers: getSupabaseHeaders()
     });
     if (res.ok) {
       const data = await res.json();
@@ -188,7 +193,7 @@ export async function supabaseGetAllUsers() {
   return Array.from(map.values());
 }
 
-// Réinitialiser ou définir le mot de passe
+// Réinitialiser un mot de passe
 export async function supabaseUpdatePassword(email: string, newPass: string) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -202,21 +207,15 @@ export async function supabaseUpdatePassword(email: string, newPass: string) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
       method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        password: newPass
-      })
+      headers: getSupabaseHeaders(),
+      body: JSON.stringify({ password: newPass })
     });
   } catch (err) {
     console.error('Erreur MAJ mot de passe Supabase:', err);
   }
 }
 
-// Sauvegarde des données personnalisées de l'utilisateur (tâches, cours, habitudes, agenda)
+// Données personnalisées du planner
 export async function supabaseSaveUserData(email: string, userData: any) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -225,15 +224,9 @@ export async function supabaseSaveUserData(email: string, userData: any) {
   writeDb(db);
 
   try {
-    // Upsert dans Supabase user_data
     await fetch(`${SUPABASE_URL}/rest/v1/user_data`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
+      headers: getSupabaseHeaders(true),
       body: JSON.stringify({
         email: cleanEmail,
         data: userData,
@@ -241,11 +234,10 @@ export async function supabaseSaveUserData(email: string, userData: any) {
       })
     });
   } catch (err) {
-    console.error('Erreur sauvegarde Supabase user_data:', err);
+    console.error('Erreur sauvegarde user_data:', err);
   }
 }
 
-// Récupération des données personnalisées de l'utilisateur
 export async function supabaseGetUserData(email: string) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -253,10 +245,7 @@ export async function supabaseGetUserData(email: string) {
 
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/user_data?email=eq.${encodeURIComponent(cleanEmail)}&select=data`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers: getSupabaseHeaders()
     });
     if (res.ok) {
       const records = await res.json();
@@ -265,7 +254,7 @@ export async function supabaseGetUserData(email: string) {
       }
     }
   } catch (err) {
-    console.error('Erreur lecture Supabase user_data:', err);
+    console.error('Erreur lecture user_data:', err);
   }
 
   return localData || null;
