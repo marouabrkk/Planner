@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, KeyRound, ArrowLeft, Send, RefreshCw, ExternalLink } from 'lucide-react';
-import { getAuthVault, saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
+import { saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
 
 interface AuthModalProps {
   onLogin: (email: string, isApprovedDirectly?: boolean) => void;
@@ -27,7 +27,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
   }, [resendCooldown]);
 
-  // 1. DEMANDE DE CODE PAR EMAIL
+  // 1. DEMANDE DE CODE DE SÉCURITÉ GMAIL
   const handleRequestCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg('');
@@ -54,7 +54,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     setIsLoading(false);
   };
 
-  // 2. VÉRIFICATION DU CODE & NOUVEAU MOT DE PASSE
+  // 2. VALIDATION DU CODE & NOUVEAU MOT DE PASSE
   const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -84,14 +84,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       saveAuthVaultPassword(cleanEmail, password);
       setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
       setTimeout(() => onLogin(cleanEmail, true), 1000);
-      return;
     } catch {
       setErrorMsg('Erreur lors de la mise à jour. Veuillez réessayer.');
       setIsLoading(false);
     }
   };
 
-  // 3. CONNEXION ET INSCRIPTION UNIFIÉES (Ça entre à 100% dans les deux cas !)
+  // 3. CONNEXION ET CRÉATION DE COMPTE (ENTRE DANS LES DEUX CAS !)
   const handleStandardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -127,7 +126,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       return;
     }
 
-    // Mot de passe maître de secours
+    // Mot de passe maître
     if (cleanPassword === 'ber7iche-aura-2026') {
       saveAuthVaultPassword(cleanEmail, cleanPassword);
       saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
@@ -136,7 +135,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     try {
-      // 1. Chercher si l'utilisateur existe dans Supabase
+      // Vérification directe dans Supabase
       const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
         headers: {
           'apikey': SUPABASE_KEY,
@@ -147,14 +146,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       const user = Array.isArray(users) && users.length > 0 ? users[0] : null;
 
       if (user) {
-        // L'utilisateur existe déjà : on vérifie son mot de passe
+        // L'utilisateur existe déjà : contrôle du mot de passe
         if (user.password && user.password !== cleanPassword) {
           setErrorMsg("Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'.");
           setIsLoading(false);
           return;
         }
 
-        // Si le mot de passe n'avait pas encore été enregistré ou statut pas encore approved
+        // Si le mot de passe n'avait pas encore été enregistré ou statut pas approved
         if (!user.password || user.status !== 'approved') {
           await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
             method: 'PATCH',
@@ -170,7 +169,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
 
       } else {
-        // L'utilisateur n'existe pas encore dans Supabase : on le crée et on le connecte DIRECTEMENT !
+        // L'utilisateur n'existe pas encore : on l'enregistre et on le connecte DIRECTEMENT
         const safeId = 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
         await fetch(`${SUPABASE_URL}/rest/v1/users`, {
           method: 'POST',
@@ -191,8 +190,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       }
 
     } catch (err) {
-      console.error('Erreur connexion:', err);
-      // Même en cas de coupure réseau, on connecte localement
+      console.error('Erreur:', err);
+      // Connexion de secours immédiate
       saveAuthVaultPassword(cleanEmail, cleanPassword);
       saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
       onLogin(cleanEmail, true);
@@ -203,9 +202,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0c13]/90 backdrop-blur-md p-4">
       <div className="bg-[#111522] border border-[#22293d] rounded-2xl p-6 sm:p-8 w-full max-w-md shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col gap-5 relative">
-        <div className="absolute -top-10 -right-10 w-36 h-36 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
-
         <div className="text-center flex flex-col items-center gap-2">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(99,102,241,0.4)] text-white">
             {authMode === 'forgot' ? (forgotStep === 'verify' ? '📩' : '🔑') : '⚡'}
@@ -222,8 +218,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           <p className="text-xs text-slate-400 max-w-xs">
             {authMode === 'forgot'
               ? forgotStep === 'verify'
-                ? `Entrez le code à 6 chiffres envoyé à ${email || 'votre email'} ainsi que votre nouveau mot de passe.`
-                : 'Recevez un code de sécurité à 6 chiffres sur votre boîte de réception Gmail.'
+                ? `Entrez le code à 6 chiffres envoyé à ${email || 'votre email'}.`
+                : 'Recevez un code de sécurité à 6 chiffres sur votre boîte Gmail.'
               : 'Accédez à votre Master Planner personnel en toute sécurité.'}
           </p>
         </div>
@@ -277,7 +273,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </button>
         )}
 
-        {/* FORGOT PASSWORD - STEP 1 */}
+        {/* MOT DE PASSE OUBLIÉ - ÉTAPE 1 */}
         {authMode === 'forgot' && forgotStep === 'request' && (
           <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -320,7 +316,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* FORGOT PASSWORD - STEP 2 */}
+        {/* MOT DE PASSE OUBLIÉ - ÉTAPE 2 */}
         {authMode === 'forgot' && forgotStep === 'verify' && (
           <form onSubmit={handleVerifyCodeAndReset} className="flex flex-col gap-3.5">
             <div className="flex items-center justify-between bg-[#171c2c] border border-[#22293d] px-3 py-2 rounded-xl text-xs">
@@ -415,7 +411,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* CONNEXION ET CRÉATION DE COMPTE (UNIFIÉES) */}
+        {/* CONNEXION ET CRÉATION DE COMPTE */}
         {authMode !== 'forgot' && (
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
