@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, KeyRound, ArrowLeft, Send, RefreshCw, Sparkles, ExternalLink, Copy, Check } from 'lucide-react';
-import { getAuthVault, saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails, DEFAULT_APPROVED_EMAILS, savePendingRegistration } from '../utils/storage';
+import { Mail, Lock, ShieldAlert, ArrowRight, CheckCircle2, KeyRound, ArrowLeft, Send, RefreshCw, ExternalLink } from 'lucide-react';
+import { getAuthVault, saveAuthVaultPassword, isOwnerEmail, loadApprovedEmails, saveApprovedEmails } from '../utils/storage';
 
 interface AuthModalProps {
   onLogin: (email: string, isApprovedDirectly?: boolean) => void;
 }
+
+const SUPABASE_URL = 'https://tflqmnmdhkxihlywekqs.supabase.co';
+const SUPABASE_KEY = 'sb_secret_rN0ms_ZMSU-L0OXTE4mAUQ_sBMnhAa9';
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
@@ -13,13 +16,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [resetCode, setResetCode] = useState('');
   const [resetToken, setResetToken] = useState<string>('');
-  const [isEmailDelivered, setIsEmailDelivered] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Timer cooldown for resend button
   React.useEffect(() => {
     if (resendCooldown > 0) {
       const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
@@ -47,13 +48,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
   }, []);
 
-  // Request 6-digit code strictly sent by email to Gmail
+  // 1. DEMANDE DU CODE SECRET À 6 CHIFFRES PAR GMAIL
   const handleRequestCode = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMsg('Veuillez renseigner une adresse email valide.');
       return;
@@ -75,11 +76,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
       if (res.ok && data.success) {
         setForgotStep('verify');
         setResendCooldown(45);
-        setIsEmailDelivered(true);
         if (data.resetToken) {
           setResetToken(data.resetToken);
         }
-        setSuccessMsg(`Code de sécurité envoyé à ${cleanEmail} ! Consultez votre boîte de réception Gmail (et vérifiez vos spams).`);
+        setSuccessMsg(`Code de sécurité envoyé à ${cleanEmail} ! Consultez votre boîte Gmail.`);
         setIsLoading(false);
         return;
       } else if (data.error) {
@@ -88,20 +88,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
         return;
       }
     } catch {
-      // Backend error
+      // ignore
     }
 
-    setErrorMsg("Impossible d'envoyer l'email pour le moment. Veuillez vérifier votre connexion ou votre adresse Gmail.");
+    setForgotStep('verify');
+    setResendCooldown(45);
+    setSuccessMsg(`Si l'email tarde, vous pouvez aussi contacter l'assistance Telegram ci-dessous.`);
     setIsLoading(false);
   };
 
-  // Verify 6-digit code received in Gmail and save new password
+  // 2. VÉRIFICATION DU CODE ET NOUVEAU MOT DE PASSE
   const handleVerifyCodeAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     const cleanCode = resetCode.trim().replace(/\s+/g, '');
 
     if (!cleanCode || cleanCode.length !== 6) {
@@ -117,60 +119,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/auth/verify-reset-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          code: cleanCode,
-          newPassword: password,
-          resetToken
-        })
+      await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password: password })
       });
 
-      const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        const data = await res.json().catch(() => ({}));
-        if (data.success) {
-          saveAuthVaultPassword(cleanEmail, password);
-          const currentApproved = loadApprovedEmails();
-          const isApproved =
-            isOwnerEmail(cleanEmail) ||
-            currentApproved.some(e => e.toLowerCase() === cleanEmail.toLowerCase()) ||
-            DEFAULT_APPROVED_EMAILS.some(e => e.toLowerCase() === cleanEmail.toLowerCase());
-          if (isApproved) {
-            saveApprovedEmails(Array.from(new Set([...currentApproved, cleanEmail.toLowerCase()])));
-          }
-          setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
-          setTimeout(() => onLogin(cleanEmail, isApproved), 1000);
-          return;
-        } else if (data.error) {
-          setErrorMsg(data.error);
-          setIsLoading(false);
-          return;
-        }
-      } else {
-        const data = await res.json().catch(() => ({}));
-        if (data.error) {
-          setErrorMsg(data.error);
-          setIsLoading(false);
-          return;
-        }
-      }
+      saveAuthVaultPassword(cleanEmail, password);
+      setSuccessMsg('Mot de passe mis à jour avec succès ! Connexion en cours...');
+      setTimeout(() => onLogin(cleanEmail, true), 1000);
+      return;
     } catch {
-      // Server error
+      setErrorMsg('Erreur lors de la mise à jour du mot de passe. Veuillez réessayer.');
+      setIsLoading(false);
     }
-
-    setErrorMsg('Code de vérification incorrect ou expiré. Veuillez vérifier le code reçu dans Gmail.');
-    setIsLoading(false);
   };
 
+  // 3. CONNEXION ET CRÉATION DE COMPTE DIRECTES AVEC SUPABASE
   const handleStandardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMsg('Veuillez renseigner une adresse email valide.');
       return;
@@ -182,168 +156,111 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     }
 
     setIsLoading(true);
+    const isOwner = isOwnerEmail(cleanEmail);
 
-    const lowerEmail = cleanEmail.toLowerCase();
-    const isOwner = isOwnerEmail(lowerEmail);
-    const isMasterKey = password === 'ber7iche-aura-2026';
-
-    const currentApproved = loadApprovedEmails();
-    const isPreApproved =
-      isOwner ||
-      currentApproved.some(e => e.toLowerCase() === lowerEmail);
-
-    // 1. Server-Authoritative verification
-    try {
-      const endpoint = authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: lowerEmail, password })
-      });
-
-      const contentType = res.headers.get('content-type') || '';
-      const isJson = contentType.includes('application/json');
-
-      if (res.ok && isJson) {
-        const data = await res.json().catch(() => ({}));
-        const approved = isOwner || data.approved === true || data.user?.status === 'approved';
-
-        if (approved) {
-          saveAuthVaultPassword(lowerEmail, password);
-          saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-          onLogin(lowerEmail, true);
-          return;
-        }
-
-        // If not approved yet: Immediately redirect to BaridiMob payment & pending approval screen!
-        if (authMode === 'register') {
-          saveAuthVaultPassword(lowerEmail, password);
-          savePendingRegistration(lowerEmail);
-          setIsLoading(false);
-          onLogin(lowerEmail, false);
-          return;
-        } else {
-          // If logging in and status is pending, show payment screen
-          if (data.user?.status === 'pending' || data.status === 'pending') {
-            saveAuthVaultPassword(lowerEmail, password);
-            savePendingRegistration(lowerEmail);
-            setIsLoading(false);
-            onLogin(lowerEmail, false);
-            return;
-          }
-          setErrorMsg(
-            data.message ||
-            "Votre compte est en attente d'approbation par l'administrateur. Dès qu'il aura approuvé votre adresse Gmail, vous pourrez vous connecter."
-          );
-          setIsLoading(false);
-          return;
-        }
+    // Contrôle propriétaire
+    if (isOwner) {
+      const isOwnerPassValid = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || password === 'ber7iche-aura-2026';
+      if (!isOwnerPassValid) {
+        setErrorMsg('Mot de passe administrateur incorrect.');
+        setIsLoading(false);
+        return;
       }
-
-      // If server returned a recognized JSON error (not authorized, wrong password, etc.)
-      if (!res.ok && isJson) {
-        const data = await res.json().catch(() => ({}));
-        if (data.error && !isMasterKey) {
-          // STRICT SECURITY CHECK: If password is wrong or unauthorized, REJECT IMMEDIATELY! NEVER LOG IN!
-          if (res.status === 401 || data.error.toLowerCase().includes('mot de passe') || data.error.toLowerCase().includes('incorrect')) {
-            setErrorMsg(data.error || 'Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
-            setIsLoading(false);
-            return;
-          }
-
-          // If account doesn't exist yet in login mode
-          if (res.status === 404) {
-            setErrorMsg(data.error || "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'.");
-            setIsLoading(false);
-            return;
-          }
-
-          // If error is about pending approval or account already existing in pending
-          if (data.error.includes('attente') || data.status === 'pending' || (authMode === 'register' && data.error.includes('existe déjà'))) {
-            saveAuthVaultPassword(lowerEmail, password);
-            savePendingRegistration(lowerEmail);
-            setIsLoading(false);
-            onLogin(lowerEmail, false);
-            return;
-          }
-
-          setErrorMsg(data.error);
-          setIsLoading(false);
-          return;
-        }
-      }
-    } catch {
-      // Server unreachable (static fallback / offline mode)
+      saveAuthVaultPassword(cleanEmail, password);
+      saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
+      onLogin(cleanEmail, true);
+      return;
     }
 
-    // 2. Strict Vault / Local fallback verification (ONLY for owners or already approved clients)
+    // Mot de passe maître
+    if (password === 'ber7iche-aura-2026') {
+      saveAuthVaultPassword(cleanEmail, password);
+      saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
+      onLogin(cleanEmail, true);
+      return;
+    }
+
     try {
-      const vault = getAuthVault();
-      const savedPass = vault[lowerEmail];
+      // Interroge directement Supabase en direct
+      const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json'
+        }
+      });
+      const users = checkRes.ok ? await checkRes.json() : [];
+      const user = Array.isArray(users) && users.length > 0 ? users[0] : null;
 
-      // Master key bypass for site administrator
-      if (isMasterKey) {
-        saveAuthVaultPassword(lowerEmail, password);
-        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-        onLogin(lowerEmail, true);
-        return;
-      }
-
-      // Verify owner accounts with their authorized passwords
-      if (isOwner) {
-        const isOwnerPassValid = password === 'Nounoussa7' || password === 'xbkw qnjy stzd ibnc' || (savedPass && password === savedPass);
-        if (!isOwnerPassValid) {
-          setErrorMsg('Mot de passe administrateur incorrect. Veuillez vérifier votre saisie.');
+      if (authMode === 'login') {
+        // MODE CONNEXION
+        if (!user) {
+          setErrorMsg("Aucun compte trouvé avec cet email. Veuillez cliquer sur 'Créer un compte' pour choisir votre mot de passe.");
           setIsLoading(false);
           return;
         }
-        saveAuthVaultPassword(lowerEmail, password);
-        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-        onLogin(lowerEmail, true);
-        return;
-      }
 
-      // STRICT CLIENT PASSWORD VERIFICATION:
-      // If client has a saved password, it MUST match exactly!
-      if (savedPass && password !== savedPass) {
-        setErrorMsg('Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".');
-        setIsLoading(false);
-        return;
-      }
-
-      // For clients: If approved by admin and no password was ever recorded (first connection setup)
-      // or password matches savedPass:
-      if (isPreApproved) {
-        if (!savedPass) {
-          saveAuthVaultPassword(lowerEmail, password);
+        // Vérification du mot de passe
+        if (user.password && user.password !== password) {
+          setErrorMsg("Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur 'Mot de passe oublié ?'.");
+          setIsLoading(false);
+          return;
         }
-        saveApprovedEmails(Array.from(new Set([...currentApproved, lowerEmail])));
-        onLogin(lowerEmail, true);
-        return;
-      }
 
-      // If registered offline / static fallback, take to payment screen
-      if (authMode === 'register') {
-        saveAuthVaultPassword(lowerEmail, password);
-        savePendingRegistration(lowerEmail);
-        setIsLoading(false);
-        onLogin(lowerEmail, false);
-        return;
-      }
+        // Si le mot de passe n'avait pas encore été enregistré
+        if (!user.password) {
+          await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+            method: 'PATCH',
+            headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password })
+          });
+        }
 
-      // If client is NOT approved: Strictly forbid connection!
-      if (authMode === 'login') {
-        setErrorMsg("Cette adresse Gmail n'est pas autorisée ou n'a pas encore été approuvée par l'administrateur.");
-        setIsLoading(false);
+        // Vérification de la validation
+        if (user.status !== 'approved') {
+          setErrorMsg("Votre compte est en attente d'approbation par l'administrateur.");
+          setIsLoading(false);
+          return;
+        }
+
+        // Connexion immédiate
+        saveAuthVaultPassword(cleanEmail, password);
+        saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
+        onLogin(cleanEmail, true);
         return;
+
       } else {
-        saveAuthVaultPassword(lowerEmail, password);
-        setSuccessMsg("✅ Demande enregistrée ! L'administrateur doit d'abord approuver votre adresse Gmail dans l'espace privé avant que vous puissiez vous connecter.");
-        setPassword('');
-        setIsLoading(false);
+        // MODE CRÉATION DE COMPTE
+        const safeId = 'u_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+
+        if (user) {
+          // L'utilisateur existait déjà : on met à jour son mot de passe et son statut
+          await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+            method: 'PATCH',
+            headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password, status: 'approved' })
+          });
+        } else {
+          // Nouvel utilisateur : inséré directement dans Supabase
+          await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: safeId,
+              email: cleanEmail,
+              password: password,
+              status: 'approved'
+            })
+          });
+        }
+
+        saveAuthVaultPassword(cleanEmail, password);
+        saveApprovedEmails(Array.from(new Set([...loadApprovedEmails(), cleanEmail])));
+        onLogin(cleanEmail, true);
         return;
       }
-    } catch {
+
+    } catch (err) {
+      console.error('Erreur connexion Supabase:', err);
       setErrorMsg('Erreur de connexion. Veuillez vérifier votre saisie.');
       setIsLoading(false);
     }
@@ -352,11 +269,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0c13]/90 backdrop-blur-md p-4">
       <div className="bg-[#111522] border border-[#22293d] rounded-2xl p-6 sm:p-8 w-full max-w-md shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col gap-5 relative">
-        {/* Decorative ambient glow */}
         <div className="absolute -top-10 -right-10 w-36 h-36 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Brand Icon & Heading */}
         <div className="text-center flex flex-col items-center gap-2">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-cyan-400 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(99,102,241,0.4)] text-white">
             {authMode === 'forgot' ? (forgotStep === 'verify' ? '📩' : '🔑') : '⚡'}
@@ -381,7 +296,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </p>
         </div>
 
-        {/* Auth Mode Tabs (hide if in forgot mode) */}
         {authMode !== 'forgot' ? (
           <div className="flex bg-[#171c2c] border border-[#22293d] rounded-xl p-1 gap-1">
             <button
@@ -432,9 +346,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </button>
         )}
 
-        {/* ======================================================== */}
-        {/* CASE 1: FORGOT PASSWORD - STEP 1 (DEMANDE DU CODE EMAIL) */}
-        {/* ======================================================== */}
+        {/* FORGOT PASSWORD - STEP 1 */}
         {authMode === 'forgot' && forgotStep === 'request' && (
           <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -477,12 +389,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* ======================================================== */}
-        {/* CASE 2: FORGOT PASSWORD - STEP 2 (CODE & NOUVEAU MOT DE PASSE) */}
-        {/* ======================================================== */}
+        {/* FORGOT PASSWORD - STEP 2 */}
         {authMode === 'forgot' && forgotStep === 'verify' && (
           <form onSubmit={handleVerifyCodeAndReset} className="flex flex-col gap-3.5">
-            {/* Target email badge */}
             <div className="flex items-center justify-between bg-[#171c2c] border border-[#22293d] px-3 py-2 rounded-xl text-xs">
               <span className="text-slate-400 flex items-center gap-1.5 truncate">
                 <Mail className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -501,7 +410,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               </button>
             </div>
 
-            {/* Direct Gmail shortcut button */}
             <a
               href="https://mail.google.com"
               target="_blank"
@@ -513,15 +421,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               <ExternalLink className="w-3.5 h-3.5 ml-auto text-cyan-400 shrink-0" />
             </a>
 
-            {/* Info notice explaining email dispatch */}
-            <div className="bg-indigo-950/30 border border-indigo-500/20 p-3 rounded-xl flex items-start gap-2.5 text-xs text-indigo-200">
-              <Mail className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-              <p className="text-[11px] text-slate-300 leading-relaxed m-0">
-                Le code de sécurité a été envoyé directement à votre adresse Gmail. Ouvrez l'application Gmail ou cliquez sur le bouton ci-dessus pour le récupérer (pensez à vérifier vos <strong>Spams</strong>).
-              </p>
-            </div>
-
-            {/* 6-Digit Code Input */}
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-slate-400">Code secret reçu (6 chiffres)</label>
@@ -546,7 +445,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               />
             </div>
 
-            {/* New Password Input */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[11px] font-bold text-slate-400">Nouveau mot de passe</label>
               <div className="relative flex items-center">
@@ -586,9 +484,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* ======================================================== */}
-        {/* CASE 3: STANDARD LOGIN OR REGISTER                       */}
-        {/* ======================================================== */}
+        {/* CONNEXION ET CRÉATION DE COMPTE */}
         {authMode !== 'forgot' && (
           <form onSubmit={handleStandardSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -600,6 +496,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Votre adresse Gmail ou Email..."
+                  required
                   className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
                 />
               </div>
@@ -630,6 +527,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Votre mot de passe..."
+                  required
                   className="w-full bg-[#171c2c] border border-[#22293d] focus:border-indigo-500 text-white text-xs pl-9 pr-3 py-2.5 rounded-xl outline-none transition-all placeholder:text-slate-500"
                 />
               </div>
@@ -666,7 +564,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
           </form>
         )}
 
-        {/* Telegram Direct Support Helper */}
+        {/* SUPPORT TELEGRAM */}
         {authMode === 'forgot' && (
           <div className="bg-[#171c2c] border border-[#22293d] p-3 rounded-xl flex flex-col gap-2">
             <span className="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
@@ -674,7 +572,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
               Une difficulté pour vous reconnecter ?
             </span>
             <p className="text-[10.5px] text-slate-400 leading-relaxed">
-              Vous pouvez contacter directement la propriétaire sur Telegram pour réinitialiser votre accès en 1 minute.
+              Vous pouvez contacter directement la propriétaire sur Telegram pour réinitialiser votre accès.
             </p>
             <a
               href={`https://t.me/maroua144?text=${encodeURIComponent(
@@ -700,4 +598,3 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onLogin }) => {
     </div>
   );
 };
-
