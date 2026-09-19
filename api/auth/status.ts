@@ -1,4 +1,4 @@
-import { readDb, isOwnerEmail } from '../../server-db.ts';
+import { supabaseGetUser, isOwnerEmail } from '../../server-db.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,15 +9,14 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
   const email = (req.query.email as string || '').trim().toLowerCase();
-  if (!email) {
-    return res.status(400).json({ error: 'Email requis.' });
+  if (!email) return res.status(400).json({ error: 'Email requis.' });
+
+  if (isOwnerEmail(email)) {
+    return res.json({ email, status: 'approved', role: 'admin', approved: true });
   }
 
-  const db = readDb();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === email);
-
-  // Si le compte est validé dans la console admin
-  const isApproved = isOwnerEmail(email) || (user && user.status === 'approved');
+  const user = await supabaseGetUser(email);
+  const isApproved = user && user.status === 'approved';
 
   return res.json({
     email,
