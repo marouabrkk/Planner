@@ -6,3 +6,10 @@ if (authMode === 'register') {
   onLogin(lowerEmail, isOwner || approved);
   return;
 }
+if (authMode === 'register') {
+  saveAuthVaultPassword(lowerEmail, password);
+  setIsLoading(false);
+  // Passe immédiatement sur la page BaridiMob
+  onLogin(lowerEmail, isOwner);
+  return;
+}
