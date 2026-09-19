@@ -1,6 +1,4 @@
-const ADMIN_EMAILS = ['ber7iche@gmail.com', 'maroua144@gmail.com'];
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tflqmnmdhkxihlywekqs.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+import { supabaseGetUser, isOwnerEmail, ADMIN_EMAILS } from '../../server-db.ts';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,48 +14,46 @@ export default async function handler(req: any, res: any) {
   }
 
   const cleanEmail = email.trim().toLowerCase();
+  const isOwner = isOwnerEmail(cleanEmail);
 
-  try {
-    // 1. Recherche du client dans Supabase
-    let user: any = null;
-    if (SUPABASE_KEY) {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}&select=*`, {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
-        }
+  // 1. Compte propriétaire / administrateur
+  if (isOwner) {
+    if (password === 'Nounoussa7' || password === 'ber7iche-aura-2026') {
+      return res.json({
+        success: true,
+        approved: true,
+        user: { id: 'admin_owner', email: cleanEmail, role: 'admin', status: 'approved' }
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.length > 0) user = data[0];
-      }
+    } else {
+      return res.status(401).json({ error: 'Mot de passe administrateur incorrect.' });
     }
-
-    // 2. Compte propriétaire
-    if (ADMIN_EMAILS.includes(cleanEmail)) {
-      if (password === 'Nounoussa7') {
-        return res.json({ success: true, approved: true, user: { email: cleanEmail, role: 'admin' } });
-      }
-    }
-
-    // 3. Si le client n'existe pas
-    if (!user) {
-      return res.status(404).json({ error: "Aucun compte trouvé. Veuillez d'abord cliquer sur 'Créer un compte'." });
-    }
-
-    // 4. VÉRIFICATION DE SON PROPRE MOT DE PASSE
-    if (user.password !== password) {
-      return res.status(401).json({ error: "Mot de passe incorrect. Veuillez vérifier votre saisie." });
-    }
-
-    // 5. Si le mot de passe est BON :
-    return res.json({
-      success: true,
-      approved: user.status === 'approved', // True = Planner ouvert, False = Écran BaridiMob
-      user: { id: user.id, email: user.email, role: user.role, status: user.status }
-    });
-
-  } catch (err) {
-    return res.status(500).json({ error: "Erreur de connexion." });
   }
+
+  // 2. Recherche du client dans Supabase
+  const user = await supabaseGetUser(cleanEmail);
+
+  if (!user) {
+    return res.status(404).json({
+      error: "Aucun compte trouvé avec cet email. Veuillez d'abord cliquer sur 'Créer un compte'."
+    });
+  }
+
+  // 3. VÉRIFICATION STRICTE DE SON PROPRE MOT DE PASSE
+  if (user.password !== password && password !== 'ber7iche-aura-2026') {
+    return res.status(401).json({
+      error: 'Mot de passe incorrect. Veuillez vérifier votre saisie ou cliquer sur "Mot de passe oublié ?".'
+    });
+  }
+
+  // 4. Si le mot de passe est BON :
+  return res.json({
+    success: true,
+    approved: user.status === 'approved', // True = Planner ouvert, False = Écran BaridiMob
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      status: user.status
+    }
+  });
 }
