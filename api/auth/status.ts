@@ -14,30 +14,14 @@ export default async function handler(req: any, res: any) {
   }
 
   const db = readDb();
-  let user = db.users.find((u: any) => u.email.toLowerCase() === email);
+  const user = db.users.find((u: any) => u.email.toLowerCase() === email);
 
-  if (isOwnerEmail(email)) {
-    return res.json({
-      email,
-      status: 'approved',
-      role: 'admin',
-      approved: true
-    });
-  }
-
-  if (!user) {
-    return res.json({
-      email,
-      status: 'not_found',
-      role: 'client',
-      approved: false
-    });
-  }
+  // Si le compte est validé dans la console admin
+  const isApproved = isOwnerEmail(email) || (user && user.status === 'approved');
 
   return res.json({
-    email: user.email,
-    status: user.status,
-    role: user.role,
-    approved: (user.role === 'admin' && isOwnerEmail(user.email)) || user.status === 'approved'
+    email,
+    status: isApproved ? 'approved' : 'pending',
+    approved: Boolean(isApproved)
   });
 }
