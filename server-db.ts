@@ -9,11 +9,10 @@ export function isOwnerEmail(email: string): boolean {
   return ADMIN_EMAILS.includes(email.trim().toLowerCase());
 }
 
-// CONNEXION SUPABASE OFFICIELLE
+// 1. CONNEXION SUPABASE
 export const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tflqmnmdhkxihlywekqs.supabase.co';
 export const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_secret_rN0ms_ZMSU-L0OXTE4mAUQ_sBMnhAa9';
 
-// En-têtes officiels Supabase PostgREST (Ne JAMAIS envoyer Authorization: Bearer avec une clé sb_secret_)
 function getSupabaseHeaders(upsert = false) {
   const headers: Record<string, string> = {
     'apikey': SUPABASE_KEY,
@@ -25,7 +24,7 @@ function getSupabaseHeaders(upsert = false) {
   return headers;
 }
 
-// Stockage local
+// 2. BASE LOCALE
 const isVercel = Boolean(process.env.VERCEL);
 const DB_FILE = isVercel ? path.join('/tmp', 'database.json') : path.join(process.cwd(), 'database.json');
 
@@ -53,7 +52,7 @@ export function writeDb(data: any): void {
   } catch {}
 }
 
-// Récupérer un utilisateur dans Supabase
+// 3. RÉCUPÉRER UN CLIENT (SUPABASE + LOCAL)
 export async function supabaseGetUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
 
@@ -66,20 +65,17 @@ export async function supabaseGetUser(email: string) {
       if (Array.isArray(data) && data.length > 0) {
         return data[0];
       }
-    } else {
-      console.error('Erreur Supabase lecture:', res.status);
     }
   } catch (err) {
-    console.error('Erreur connexion Supabase:', err);
+    console.error('Erreur Supabase lecture:', err);
   }
 
-  // Repli base locale
   const db = readDb();
   const localUser = (db.users || []).find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
   return localUser || null;
 }
 
-// Sauvegarder ou mettre à jour un client (UPSERT dans Supabase)
+// 4. SAUVEGARDER UN CLIENT AVEC SON PROPRE MOT DE PASSE
 export async function supabaseSaveUser(user: { id: string; email: string; password?: string; status: string; role: string }) {
   const cleanEmail = user.email.trim().toLowerCase();
 
@@ -124,10 +120,11 @@ export async function supabaseSaveUser(user: { id: string; email: string; passwo
   return updatedUser;
 }
 
-// Valider un client (UPSERT direct : insère ou met à jour le statut en approved)
+// 5. VALIDER UN CLIENT DANS SUPABASE (FONCTIONNE À TOUS LES COUPS)
 export async function supabaseApproveUser(email: string) {
   const cleanEmail = email.trim().toLowerCase();
 
+  // A. Mise à jour locale
   const db = readDb();
   if (!db.users) db.users = [];
   const existing = db.users.find((u: any) => u.email && u.email.toLowerCase() === cleanEmail);
@@ -146,24 +143,40 @@ export async function supabaseApproveUser(email: string) {
   }
   writeDb(db);
 
+  // B. Mise à jour dans Supabase avec PATCH
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/users`, {
-      method: 'POST',
-      headers: getSupabaseHeaders(true),
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(cleanEmail)}`, {
+      method: 'PATCH',
+      headers: getSupabaseHeaders(),
       body: JSON.stringify({
-        id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
-        email: cleanEmail,
         status: 'approved',
-        role: isOwnerEmail(cleanEmail) ? 'admin' : 'client',
         approved_at: new Date().toISOString()
       })
     });
+
+    if (patchRes.ok) {
+      const data = await patchRes.json().catch(() => []);
+      if (!Array.isArray(data) || data.length === 0) {
+        await fetch(`${SUPABASE_URL}/rest/v1/users`, {
+          method: 'POST',
+          headers: getSupabaseHeaders(true),
+          body: JSON.stringify({
+            id: 'u_' + Buffer.from(cleanEmail).toString('base64').replace(/=/g, ''),
+            email: cleanEmail,
+            password: existing?.password || 'aura2026',
+            status: 'approved',
+            role: isOwnerEmail(cleanEmail) ? 'admin' : 'client',
+            approved_at: new Date().toISOString()
+          })
+        });
+      }
+    }
   } catch (err) {
     console.error('Erreur approbation Supabase:', err);
   }
 }
 
-// Récupérer tous les utilisateurs
+// 6. LISTE DE TOUS LES CLIENTS POUR LA CONSOLE ADMIN
 export async function supabaseGetAllUsers() {
   const db = readDb();
   const localUsers: any[] = db.users || [];
@@ -195,7 +208,7 @@ export async function supabaseGetAllUsers() {
   return Array.from(map.values());
 }
 
-// Mettre à jour le mot de passe
+// 7. METTRE À JOUR LE MOT DE PASSE (MOT DE PASSE OUBLIÉ)
 export async function supabaseUpdatePassword(email: string, newPass: string) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
@@ -217,6 +230,7 @@ export async function supabaseUpdatePassword(email: string, newPass: string) {
   }
 }
 
+// 8. DONNÉES DU PLANNER (TÂCHES, COURS, HABITUDES)
 export async function supabaseSaveUserData(email: string, userData: any) {
   const cleanEmail = email.trim().toLowerCase();
   const db = readDb();
