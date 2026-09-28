@@ -17,7 +17,7 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, courses = [
   const habitsDone = habits.filter((h) => h.doneToday).length;
   const habitsPct = habits.length > 0 ? Math.round((habitsDone / habits.length) * 100) : 0;
 
-  // Calcul des 3 couches et des QCMs
+  // Calcul de la complétion des 3 couches
   const totalCouchesDone = courses.reduce(
     (acc, c) =>
       acc +
@@ -28,7 +28,6 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, courses = [
   );
   const maxCouches = courses.length * 3;
   const couchesPct = maxCouches > 0 ? Math.round((totalCouchesDone / maxCouches) * 100) : 0;
-  const totalQcmsCount = courses.reduce((acc, c) => acc + (c.qcms?.length || 0), 0);
 
   const globalScore = Math.round(
     todayTasks.length > 0 && habits.length > 0
@@ -72,7 +71,7 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, courses = [
             />
           </div>
           <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>{totalQcmsCount > 0 ? `${totalQcmsCount} QCMs actifs` : '0%'}</span>
+            <span>{maxCouches > 0 ? `${couchesPct}% des couches validées` : '0%'}</span>
             <span>Objectif 100%</span>
           </div>
         </div>

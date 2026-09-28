@@ -86,90 +86,21 @@ export function getInitialUserData(): UserData {
         title: 'Cardiologie & Syndrome Coronaire',
         status: 'doing',
         color: '#6366f1',
-        couches: { c1: true, c1Date: today, c2: true, c2Date: today, c3: false },
-        qcms: [
-          {
-            id: 'demo_qcm_1',
-            question: "Concernant l'Infarctus du Myocarde avec sus-décalage de ST (STEMI), quel est le délai maximal recommandé pour l'angioplastie primaire ?",
-            options: [
-              "A. Moins de 120 minutes après le premier contact médical",
-              "B. Moins de 6 heures après le début de la douleur",
-              "C. Moins de 24 heures si le patient est stable",
-              "D. Uniquement après résultat du dosage des troponines"
-            ],
-            correctIndexes: [0],
-            explanation: "L'angioplastie primaire doit être effectuée dans un délai de 120 minutes suivant le premier contact médical (recommandations ESC).",
-            source: "Résidanat - Cardiologie",
-            userSelected: [0],
-            validated: true,
-            isCorrect: true
-          },
-          {
-            id: 'demo_qcm_2',
-            question: "Parmi les médicaments suivants, lesquels réduisent la mortalité dans l'insuffisance cardiaque à fraction d'éjection réduite (IC-FEr) ? (Choix multiples)",
-            options: [
-              "A. Bêta-bloquants (ex: Bisoprolol)",
-              "B. Inhibiteurs de l'ECA ou ARA II / Sacubitril-Valsartan",
-              "C. Antagonistes des récepteurs des minéralocorticoïdes (ex: Spironolactone)",
-              "D. Inhibiteurs des SGLT2 (Dapagliflozine/Empagliflozine)",
-              "E. Inhibiteurs calciques bradycardisants isolés"
-            ],
-            correctIndexes: [0, 1, 2, 3],
-            explanation: "Les 4 piliers majeurs de l'IC-FEr sont : Bêta-bloquant + IEC/ARNI + ARM + iSGLT2.",
-            source: "Concours & Recommandations",
-            userSelected: [],
-            validated: false
-          }
-        ]
+        couches: { c1: true, c1Date: today, c2: true, c2Date: today, c3: false }
       },
       {
         id: 2,
         title: 'Neurologie & AVC Ischémique',
         status: 'doing',
         color: '#06b6d4',
-        couches: { c1: true, c1Date: today, c2: false, c3: false },
-        qcms: [
-          {
-            id: 'demo_qcm_3',
-            question: "Quel est l'examen d'imagerie de référence en urgence devant une suspicion d'AVC aigu ?",
-            options: [
-              "A. Scanner cérébral sans injection de contraste",
-              "B. IRM cérébrale en séquence de Diffusion et FLAIR",
-              "C. Ponction lombaire immédiate",
-              "D. Doppler transcrânien seul"
-            ],
-            correctIndexes: [1],
-            explanation: "L'IRM cérébrale avec séquence de diffusion est l'examen de choix précoce pour visualiser l'ischémie dès les premières minutes.",
-            source: "Urgences & Neurologie",
-            userSelected: [],
-            validated: false
-          }
-        ]
+        couches: { c1: true, c1Date: today, c2: false, c3: false }
       },
       {
         id: 3,
         title: 'Pharmacologie & Antibiothérapie',
         status: 'done',
         color: '#10b981',
-        couches: { c1: true, c1Date: today, c2: true, c2Date: today, c3: true, c3Date: today },
-        qcms: [
-          {
-            id: 'demo_qcm_4',
-            question: "Concernant la toxicité des Aminosides (ex: Gentamicine), quels sont les deux principaux effets indésirables à surveiller ?",
-            options: [
-              "A. Hépatotoxicité et pancréatite",
-              "B. Néphrotoxicité et ototoxicité cochléovestibulaire",
-              "C. Hyperkaliémie et torsades de pointes",
-              "D. Fibrose pulmonaire et neuropathie périphérique"
-            ],
-            correctIndexes: [1],
-            explanation: "Les aminosides sont caractérisés par leur néphrotoxicité tubulaire aiguë et leur ototoxicité vestibulaire et auditive souvent irréversible.",
-            source: "Pharmaco Clinique",
-            userSelected: [1],
-            validated: true,
-            isCorrect: true
-          }
-        ]
+        couches: { c1: true, c1Date: today, c2: true, c2Date: today, c3: true, c3Date: today }
       }
     ],
     habits: [
