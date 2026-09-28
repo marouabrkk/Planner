@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Target, BookOpen, Zap, Trash2, Plus, Flame, Check } from 'lucide-react';
-import { Task, Course, Habit } from '../types';
+import { Target, BookOpen, Zap, Trash2, Plus, Flame, Check, HelpCircle, Layers } from 'lucide-react';
+import { Task, Course, Habit, CourseCouches } from '../types';
+import { CourseQcmModal } from './CourseQcmModal';
+import { triggerCelebration } from '../utils/storage';
 
 interface FocusViewProps {
   tasks: Task[];
@@ -13,6 +15,7 @@ interface FocusViewProps {
   onAddCourse: (title: string, color: string) => void;
   onCycleCourse: (id: number) => void;
   onDeleteCourse: (id: number) => void;
+  onUpdateCourse: (updated: Course) => void;
   onAddHabit: (title: string) => void;
   onToggleHabit: (id: number) => void;
   onDeleteHabit: (id: number) => void;
@@ -31,6 +34,7 @@ export const FocusView: React.FC<FocusViewProps> = ({
   onAddCourse,
   onCycleCourse,
   onDeleteCourse,
+  onUpdateCourse,
   onAddHabit,
   onToggleHabit,
   onDeleteHabit
@@ -39,6 +43,8 @@ export const FocusView: React.FC<FocusViewProps> = ({
   const [courseInput, setCourseInput] = useState('');
   const [courseColor, setCourseColor] = useState('#6366f1');
   const [habitInput, setHabitInput] = useState('');
+  const [selectedCourseForQcm, setSelectedCourseForQcm] = useState<Course | null>(null);
+  const [showCouchesExplainer, setShowCouchesExplainer] = useState(false);
 
   const todayTasks = tasks.filter((t) => t.date === todayStr);
   const tasksDone = todayTasks.filter((t) => t.done).length;
@@ -46,6 +52,9 @@ export const FocusView: React.FC<FocusViewProps> = ({
 
   const coursesDone = courses.filter((c) => c.status === 'done').length;
   const habitsDone = habits.filter((h) => h.doneToday).length;
+
+  // Calcul du nombre total de QCMs enregistrés
+  const totalQcmsCount = courses.reduce((acc, c) => acc + (c.qcms?.length || 0), 0);
 
   const handleAddTask = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -66,6 +75,37 @@ export const FocusView: React.FC<FocusViewProps> = ({
     if (!habitInput.trim()) return;
     onAddHabit(habitInput.trim());
     setHabitInput('');
+  };
+
+  const handleToggleCourseCouche = (c: Course, coucheKey: 'c1' | 'c2' | 'c3') => {
+    const currentCouches = c.couches || { c1: false, c2: false, c3: false };
+    const nextVal = !currentCouches[coucheKey];
+    const today = new Date().toLocaleDateString('fr-FR');
+    
+    const updatedCouches: CourseCouches = {
+      ...currentCouches,
+      [coucheKey]: nextVal,
+      [`${coucheKey}Date`]: nextVal ? today : undefined
+    };
+
+    // Progression automatique intelligente du statut
+    const allDone = updatedCouches.c1 && updatedCouches.c2 && updatedCouches.c3;
+    const anyDone = updatedCouches.c1 || updatedCouches.c2 || updatedCouches.c3;
+    let nextStatus = c.status;
+    if (allDone) {
+      nextStatus = 'done';
+      triggerCelebration();
+    } else if (anyDone && c.status === 'todo') {
+      nextStatus = 'doing';
+    }
+
+    const updatedCourse: Course = {
+      ...c,
+      couches: updatedCouches,
+      status: nextStatus
+    };
+
+    onUpdateCourse(updatedCourse);
   };
 
   return (
@@ -151,19 +191,57 @@ export const FocusView: React.FC<FocusViewProps> = ({
         </div>
       </div>
 
-      {/* ================= COLONNE 2 : COURS & RÉVISIONS ================= */}
+      {/* ================= COLONNE 2 : COURS, 3 COUCHES & QCMS ================= */}
       <div className="bg-[#111522] border border-[#22293d] rounded-2xl p-4 flex flex-col gap-3 min-h-[460px] max-h-[75vh] shadow-sm">
         <div className="flex justify-between items-center pb-2.5 border-b border-[#22293d]">
           <div className="flex items-center gap-2 font-bold text-sm text-white">
             <span className="p-1 rounded-lg bg-cyan-500/20 text-cyan-400">
               <BookOpen className="w-4 h-4" />
             </span>
-            <span>Cours & Révisions</span>
+            <span>Cours, 3 Couches & QCMs</span>
+            <button
+              type="button"
+              onClick={() => setShowCouchesExplainer(!showCouchesExplainer)}
+              className="text-slate-400 hover:text-cyan-300 transition-colors"
+              title="Comprendre la Méthode des 3 Couches"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+            </button>
           </div>
-          <span className="bg-[#1f263b] border border-[#22293d] text-cyan-300 text-xs px-2.5 py-0.5 rounded-full font-bold">
-            {coursesDone}/{courses.length} maîtrisés
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="bg-[#1f263b] border border-[#22293d] text-cyan-300 text-[11px] px-2 py-0.5 rounded-full font-bold">
+              {coursesDone}/{courses.length} maîtrisés
+            </span>
+            {totalQcmsCount > 0 && (
+              <span className="bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                {totalQcmsCount} QCMs
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Info Explainer Tooltip Banner */}
+        {showCouchesExplainer && (
+          <div className="bg-[#161d2f] border border-cyan-500/30 rounded-xl p-3 text-[11px] text-slate-300 flex flex-col gap-1.5 animate-fadeIn">
+            <div className="flex items-center justify-between text-cyan-400 font-bold">
+              <span className="flex items-center gap-1">
+                <Layers className="w-3.5 h-3.5" />
+                La Méthode des 3 Couches Médicale :
+              </span>
+              <button
+                onClick={() => setShowCouchesExplainer(false)}
+                className="text-slate-400 hover:text-white text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p>
+              • <strong className="text-cyan-300">C1 (Apprentissage)</strong> : Compréhension générale, première lecture détaillée du cours.<br />
+              • <strong className="text-amber-300">C2 (Mémorisation)</strong> : Consolidation active, fiches synthèses et fixation des détails.<br />
+              • <strong className="text-emerald-300">C3 (Ultime / Annales)</strong> : Révision finale rapide et entraînement intensif aux QCMs.
+            </p>
+          </div>
+        )}
 
         {/* Input */}
         <form onSubmit={handleAddCourse} className="flex gap-2 items-center">
@@ -209,14 +287,20 @@ export const FocusView: React.FC<FocusViewProps> = ({
         </div>
 
         {/* Courses list */}
-        <div className="flex flex-col gap-2 overflow-y-auto pr-1 flex-1">
+        <div className="flex flex-col gap-2.5 overflow-y-auto pr-1 flex-1">
           {courses.length === 0 ? (
             <div className="text-center text-slate-500 text-xs py-8 italic">
-              Aucun cours ou module enregistré. Ajoutez vos matières de révision !
+              Aucun cours ou module enregistré. Ajoutez vos matières pour lancer vos 3 couches et QCMs !
             </div>
           ) : (
             courses.map((c) => {
               const color = c.color || '#6366f1';
+              const couches = c.couches || { c1: false, c2: false, c3: false };
+              const qcmsList = c.qcms || [];
+              const answeredQcms = qcmsList.filter((q) => q.validated);
+              const correctQcms = answeredQcms.filter((q) => q.isCorrect);
+              const qcmScorePct = answeredQcms.length > 0 ? Math.round((correctQcms.length / answeredQcms.length) * 100) : null;
+
               let tagClass = 'bg-red-500/15 text-red-400 border-red-500/30';
               let tagLabel = 'À réviser';
               if (c.status === 'doing') {
@@ -230,33 +314,110 @@ export const FocusView: React.FC<FocusViewProps> = ({
               return (
                 <div
                   key={c.id}
-                  className="bg-[#171c2c] border border-[#22293d] hover:border-[#374261] p-3 rounded-xl flex items-center justify-between gap-3 transition-all"
+                  className="bg-[#171c2c] border border-[#22293d] hover:border-[#374261] p-3 rounded-xl flex flex-col gap-2.5 transition-all"
                   style={{ borderLeftWidth: '4px', borderLeftColor: color }}
                 >
-                  <div className="flex items-center gap-2 overflow-hidden flex-1">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}
-                    />
-                    <span className="text-xs font-semibold text-slate-200 truncate">{c.title}</span>
+                  {/* Top row: Course title + Status badge + Delete */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 overflow-hidden flex-1">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}
+                      />
+                      <span className="text-xs font-bold text-white truncate" title={c.title}>
+                        {c.title}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onCycleCourse(c.id)}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all hover:scale-105 active:scale-95 cursor-pointer ${tagClass}`}
+                        title="Cliquez pour basculer le statut global (À réviser ➔ En cours ➔ Maîtrisé)"
+                      >
+                        {tagLabel}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteCourse(c.id)}
+                        className="text-slate-500 hover:text-red-400 p-1 rounded-lg hover:bg-red-500/10 transition-colors"
+                        title="Supprimer ce cours"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  {/* Bottom row: Les 3 Couches (C1, C2, C3) + Bouton QCMs */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#1f2639] flex-wrap">
+                    
+                    {/* Les 3 Couches */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-400 font-semibold mr-0.5">Couches :</span>
+                      
+                      {/* C1 */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleCourseCouche(c, 'c1')}
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
+                          couches.c1
+                            ? 'bg-cyan-500/25 border-cyan-500 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                            : 'bg-[#121624] border-[#22293d] text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                        }`}
+                        title={couches.c1 ? `C1 validée (${couches.c1Date || 'Faite'})` : 'Cliquer pour valider Couche 1 : Compréhension & 1ère lecture'}
+                      >
+                        C1 {couches.c1 ? '✓' : ''}
+                      </button>
+
+                      {/* C2 */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleCourseCouche(c, 'c2')}
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
+                          couches.c2
+                            ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.3)]'
+                            : 'bg-[#121624] border-[#22293d] text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                        }`}
+                        title={couches.c2 ? `C2 validée (${couches.c2Date || 'Faite'})` : 'Cliquer pour valider Couche 2 : Mémorisation & Consolidation'}
+                      >
+                        C2 {couches.c2 ? '✓' : ''}
+                      </button>
+
+                      {/* C3 */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleCourseCouche(c, 'c3')}
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
+                          couches.c3
+                            ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                            : 'bg-[#121624] border-[#22293d] text-slate-500 hover:text-slate-300 hover:border-slate-500'
+                        }`}
+                        title={couches.c3 ? `C3 validée (${couches.c3Date || 'Faite'})` : 'Cliquer pour valider Couche 3 : Révision Ultime & Annales'}
+                      >
+                        C3 {couches.c3 ? '✓' : ''}
+                      </button>
+                    </div>
+
+                    {/* Bouton QCMs */}
                     <button
                       type="button"
-                      onClick={() => onCycleCourse(c.id)}
-                      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all hover:scale-105 active:scale-95 cursor-pointer ${tagClass}`}
-                      title="Cliquez pour changer le statut (À réviser ➔ En cours ➔ Maîtrisé)"
+                      onClick={() => setSelectedCourseForQcm(c)}
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-105 active:scale-95 ${
+                        qcmsList.length > 0
+                          ? 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border-indigo-500/40 shadow-[0_0_8px_rgba(99,102,241,0.2)]'
+                          : 'bg-[#181f30] hover:bg-[#202940] text-slate-400 hover:text-white border-[#242e47]'
+                      }`}
+                      title="Ouvrir la session d'entraînement QCM & la banque de questions pour ce cours"
                     >
-                      {tagLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteCourse(c.id)}
-                      className="text-slate-500 hover:text-red-400 p-1 rounded-lg hover:bg-red-500/10 transition-colors"
-                      title="Supprimer ce cours"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>📝</span>
+                      <span>
+                        {qcmsList.length === 0
+                          ? 'Ajouter QCMs'
+                          : qcmScorePct !== null
+                          ? `${qcmsList.length} QCMs (${qcmScorePct}%)`
+                          : `${qcmsList.length} QCMs`}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -352,6 +513,19 @@ export const FocusView: React.FC<FocusViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* ================= MODALE INTERACTIVE QCMS & 3 COUCHES ================= */}
+      {selectedCourseForQcm && (
+        <CourseQcmModal
+          course={selectedCourseForQcm}
+          onClose={() => setSelectedCourseForQcm(null)}
+          onUpdateCourse={(updated) => {
+            onUpdateCourse(updated);
+            setSelectedCourseForQcm(updated);
+          }}
+        />
+      )}
     </div>
   );
 };
+

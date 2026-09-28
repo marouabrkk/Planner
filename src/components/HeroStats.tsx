@@ -1,20 +1,34 @@
 import React from 'react';
-import { Flame, CheckCircle2, Zap, TrendingUp } from 'lucide-react';
-import { Task, Habit } from '../types';
+import { Flame, CheckCircle2, Zap, TrendingUp, Layers } from 'lucide-react';
+import { Task, Habit, Course } from '../types';
 
 interface HeroStatsProps {
   tasks: Task[];
   habits: Habit[];
+  courses?: Course[];
   todayStr: string;
 }
 
-export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, todayStr }) => {
+export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, courses = [], todayStr }) => {
   const todayTasks = tasks.filter((t) => t.date === todayStr);
   const tasksDone = todayTasks.filter((t) => t.done).length;
   const tasksPct = todayTasks.length > 0 ? Math.round((tasksDone / todayTasks.length) * 100) : 0;
 
   const habitsDone = habits.filter((h) => h.doneToday).length;
   const habitsPct = habits.length > 0 ? Math.round((habitsDone / habits.length) * 100) : 0;
+
+  // Calcul des 3 couches et des QCMs
+  const totalCouchesDone = courses.reduce(
+    (acc, c) =>
+      acc +
+      (c.couches?.c1 ? 1 : 0) +
+      (c.couches?.c2 ? 1 : 0) +
+      (c.couches?.c3 ? 1 : 0),
+    0
+  );
+  const maxCouches = courses.length * 3;
+  const couchesPct = maxCouches > 0 ? Math.round((totalCouchesDone / maxCouches) * 100) : 0;
+  const totalQcmsCount = courses.reduce((acc, c) => acc + (c.qcms?.length || 0), 0);
 
   const globalScore = Math.round(
     todayTasks.length > 0 && habits.length > 0
@@ -44,6 +58,11 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, todayStr })
         </div>
         <div className="text-3xl font-black my-2 flex items-baseline gap-1.5 text-white">
           <span>{globalScore}%</span>
+          {maxCouches > 0 && (
+            <span className="text-[11px] font-bold text-slate-400">
+              • {totalCouchesDone}/{maxCouches} couches
+            </span>
+          )}
         </div>
         <div>
           <div className="w-full h-2 bg-[#1f263b] rounded-full overflow-hidden">
@@ -53,7 +72,7 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ tasks, habits, todayStr })
             />
           </div>
           <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>0%</span>
+            <span>{totalQcmsCount > 0 ? `${totalQcmsCount} QCMs actifs` : '0%'}</span>
             <span>Objectif 100%</span>
           </div>
         </div>

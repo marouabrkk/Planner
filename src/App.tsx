@@ -336,7 +336,7 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      <HeroStats tasks={userData.tasks} habits={userData.habits} todayStr={todayStr} />
+      <HeroStats tasks={userData.tasks} habits={userData.habits} courses={userData.courses} todayStr={todayStr} />
 
       {activeTab === 'focus' && (
         <FocusView
@@ -372,6 +372,10 @@ export default function App() {
           }}
           onDeleteCourse={(id) => {
             updateData({ ...userData, courses: userData.courses.filter((c) => c.id !== id) });
+          }}
+          onUpdateCourse={(updatedCourse) => {
+            const updated = userData.courses.map((c) => (c.id === updatedCourse.id ? updatedCourse : c));
+            updateData({ ...userData, courses: updated });
           }}
           onAddHabit={(title) => {
             const newHabit: Habit = { id: Date.now(), title, doneToday: false, streak: 0 };

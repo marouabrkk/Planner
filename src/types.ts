@@ -12,11 +12,35 @@ export interface Task {
   category?: 'task' | 'exam' | 'event' | 'birthday';
 }
 
+export interface QcmQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctIndexes: number[]; // index of correct choices (0 = A, 1 = B, ...)
+  explanation?: string;
+  source?: string;
+  userSelected?: number[];
+  validated?: boolean;
+  isCorrect?: boolean;
+}
+
+export interface CourseCouches {
+  c1: boolean; // Couche 1: Apprentissage & Compréhension
+  c1Date?: string;
+  c2: boolean; // Couche 2: Consolidation & Mémorisation
+  c2Date?: string;
+  c3: boolean; // Couche 3: Révision Ultime & Annales / QCMs
+  c3Date?: string;
+}
+
 export interface Course {
   id: number;
   title: string;
   status: 'todo' | 'doing' | 'done';
   color: string;
+  couches?: CourseCouches;
+  qcms?: QcmQuestion[];
+  notes?: string;
 }
 
 export interface Habit {
